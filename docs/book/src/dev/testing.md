@@ -4,6 +4,10 @@
 `xtask licences --check`, `xtask layers`, clippy with `-D warnings`, the tests with the `ci`
 profile and the wasm build check.
 
+Before running those gates, `cargo xtask ci` checks for the active toolchain's wasm standard
+library. For `cargo +stable xtask ci`, install it with
+`rustup target add --toolchain stable wasm32-unknown-unknown`.
+
 | Harness | Where | What it catches |
 |---|---|---|
 | Unit and engine tests | next to the code, `*_tests.rs` | measured results: volume, area, topology counts against derived values |
