@@ -661,6 +661,53 @@ pub(crate) fn hostile_values() -> Vec<Value> {
     ]
 }
 
+fn hostile_fixture() -> Session {
+    let mut session = Session::default();
+    // A body and an active sketch let commands reach their parameter and geometry checks.
+    run(&mut session, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut session, "sketch.create", json!({"plane": "XY"}));
+    run(&mut session, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [5, 5]}));
+    session
+}
+
+fn copy_hostile_fixture(fixture: &Session) -> Session {
+    let mut session = fixture.scratch();
+    // Scratch sessions normally omit history. Hostile inputs also exercise Undo and Redo,
+    // so keep exactly the state a freshly constructed fixture would have.
+    session.undo = fixture.undo.clone();
+    session.redo = fixture.redo.clone();
+    session.log = fixture.log.clone();
+    session.evaluations = fixture.evaluations;
+    session
+}
+
+#[test]
+fn hostile_fixture_copies_keep_history_and_isolate_changes() {
+    let fixture = hostile_fixture();
+    let original = fixture.doc.clone();
+    let mut copied = copy_hostile_fixture(&fixture);
+    let mut rebuilt = hostile_fixture();
+    assert_eq!(copied.doc, rebuilt.doc);
+    assert_eq!(copied.log, rebuilt.log);
+    assert_eq!(copied.evaluations, rebuilt.evaluations);
+    assert_eq!(copied.undo.len(), 3);
+    assert_eq!(volume(&mut copied), 1000.0);
+    for command in ["edit.undo", "edit.undo", "edit.undo", "edit.redo", "edit.redo", "edit.redo"] {
+        assert_eq!(run(&mut copied, command, json!({})), run(&mut rebuilt, command, json!({})));
+        assert_eq!(copied.doc, rebuilt.doc);
+        assert_eq!(copied.active_sketch, rebuilt.active_sketch);
+        assert_eq!(copied.revision, rebuilt.revision);
+        assert_eq!(copied.undo.len(), rebuilt.undo.len());
+        assert_eq!(copied.redo.len(), rebuilt.redo.len());
+        assert_eq!(copied.model.state().bodies.len(), rebuilt.model.state().bodies.len());
+        assert_eq!(fixture.doc, original, "a case must not change the shared fixture");
+    }
+    run(&mut copied, "solid.box", json!({"length": 2, "width": 3, "height": 4}));
+    assert_eq!(fixture.doc, original);
+    assert_eq!(fixture.model.state().bodies.len(), 1);
+    assert_eq!(copy_hostile_fixture(&fixture).doc, original);
+}
+
 /// Every command, every parameter name it documents, every hostile value: no panic escapes and
 /// no command panics internally.
 #[test]
@@ -785,6 +832,7 @@ fn hostile_params_never_panic() {
         let workers: Vec<_> = (0..threads)
             .map(|_| {
                 scope.spawn(|| {
+                    let fixture = hostile_fixture();
                     let mut internal = Vec::new();
                     while let Some(&id) = ids.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
                         for v in hostile_values() {
@@ -792,11 +840,7 @@ fn hostile_params_never_panic() {
                                 if k == "path" && (id.starts_with("parameters.") || id == "timeline.export_script") {
                                     continue; // parameter and script files: covered by their own tests (no stray files)
                                 }
-                                let mut s = Session::default();
-                                // A model with a sketch, a body and an active sketch, so most commands get far.
-                                let _ = s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10}));
-                                let _ = s.execute("sketch.create", &json!({"plane": "XY"}));
-                                let _ = s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [5, 5]}));
+                                let mut s = copy_hostile_fixture(&fixture);
                                 let p = json!({ k: v.clone() });
                                 if let Err(EngineError::Internal(id, msg)) = s.execute(id, &p) {
                                     internal.push(format!("{id} {p}: {msg}"));

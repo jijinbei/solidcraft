@@ -29,6 +29,12 @@ slow-timeout = { period = "60s" }
 [profile.ci.junit]
 path = "junit.xml"
 
+# This test already distributes its commands over one worker per CPU. Reserve the runner's
+# slots so nextest does not schedule another set of CPU-heavy tests alongside those workers.
+[[profile.ci.overrides]]
+filter = "package(solidcraft-engine) & test(=tests::hostile_params_never_panic)"
+threads-required = "num-cpus"
+
 # The action matrix sample runs its designs in parallel worker processes, one per CPU. Run with
 # other tests beside it (the heavy ones on main), a pi-case hole that takes 8 s alone (#952 makes
 # it a real hole) went past the matrix's 90 s action limit. It runs on its own.
