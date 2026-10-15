@@ -78,14 +78,16 @@ On GitHub, one job builds the tests into a
 [cargo-nextest](https://nexte.st/) archive and four jobs run a quarter of the tests each
 (`--partition slice:N/4`, settings in `.config/nextest.toml`); doc tests run in their own job.
 Pull requests skip a few heavy tests (each takes one to four minutes); they run on every push to
-`main`, nightly, and in `cargo xtask test`:
+`main`, nightly, and in `cargo xtask test`. Kernel changes also run the tangent-primitive boolean
+regression and a sample of robustness goldens. The kernel change detector includes `crates/kernel`,
+its `crates/geom` dependency, vendored truck crates, and workspace dependency/toolchain inputs:
 
 - `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness` and
-  `tests::robustness_goldens` (pull requests that touch `crates/kernel` run its `sample_*` part),
+  `tests::robustness_goldens` (kernel-related pull requests run its `sample_*` part),
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`
-- `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives`
+- `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives` (on kernel-related PRs)
 - `solidcraft-ui-egui` scenarios: `acceptance_sensor_enclosure`
 
 The **action matrix** (`apps/solidcraft-cli/tests/action_matrix.rs`) tries every ordinary action

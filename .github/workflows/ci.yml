@@ -68,7 +68,12 @@ jobs:
             # Compare both old and new paths of renames; unknown paths run native checks.
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
             while IFS= read -r -d '' path; do
-              case "$path" in crates/kernel/*|vendor/truck-*) kernel=true ;; esac
+              # Kernel regressions can also enter through its geometry dependency or a locked
+              # dependency/toolchain change, so include those paths in the targeted test gate.
+              case "$path" in
+                crates/kernel/*|crates/geom/*|vendor/truck-*|Cargo.toml|Cargo.lock|.cargo/*|rust-toolchain*) kernel=true
+                ;;
+              esac
               case "$path" in
                 .github/workflows/ci.yml) native=true ;;
                 *.rs|Cargo.toml|Cargo.lock|*/Cargo.toml|.cargo/*|rust-toolchain*) native=true ;;
@@ -194,6 +199,12 @@ jobs:
           cargo nextest run --archive-file tests.tar.zst --workspace-remap . --extract-to . --extract-overwrite \
             --profile ci --ignore-default-filter \
             -E "package(solidcraft-engine) & test(=tests::robustness_goldens::sample_$((SHARD - 1)))"
+      - name: Tangent primitive boolean regression (pull requests that touch the kernel)
+        if: github.event_name == 'pull_request' && needs.changes.outputs.kernel == 'true'
+        run: |
+          cargo nextest run --archive-file tests.tar.zst --workspace-remap . --extract-to . --extract-overwrite \
+            --profile ci --ignore-default-filter \
+            -E 'package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives)'
       - name: Upload test timings
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
