@@ -170,10 +170,13 @@ test('unclaim by a maintainer releases, by a stranger does not', async () => {
   assert.equal(find(w.calls, 'react')[1].content, 'eyes');
 });
 
-test('unclaim never touches an issue assigned to the owner', async () => {
-  const { github, calls } = fake();
-  await claim.handleComment({ github, context: ctx('/unclaim', { user: 'bherbruck', assignees: ['bherbruck'], labels: ['in progress'] }), now: NOW });
-  assert.equal(find(calls, 'removeLabel'), undefined);
+test('unclaim on an owner-assigned issue works only for the owner', async () => {
+  let w = fake();
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'carol', assignees: ['bherbruck'], labels: ['in progress'] }), now: NOW });
+  assert.equal(find(w.calls, 'removeLabel'), undefined);
+  w = fake();
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'bherbruck', assignees: ['bherbruck'], labels: ['in progress'] }), now: NOW });
+  assert.ok(find(w.calls, 'removeLabel'));
 });
 
 const issue = (number, assignees = ['bob']) => ({

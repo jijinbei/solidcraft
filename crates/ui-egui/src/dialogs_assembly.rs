@@ -21,6 +21,10 @@ use crate::theme::Tokens;
 
 use crate::viewport::Proj;
 
+#[path = "dialogs_trace.rs"]
+mod trace;
+pub use trace::TraceForm;
+
 /// Joint types in the order the Type box lists them (command names).
 pub const TYPES: [&str; 7] = ["rigid", "revolute", "slider", "cylindrical", "pin_slot", "planar", "ball"];
 const TYPE_LABELS: [&str; 7] = ["Rigid", "Revolute", "Slider", "Cylindrical", "Pin-slot", "Planar", "Ball"];
@@ -73,6 +77,8 @@ pub enum Asm {
         overlaps: Vec<Mesh>,
         of: Vec<Sel>,
     },
+    /// Motion Trace: a picked point's path, previewed; OK keeps it as a 3D sketch spline.
+    Trace(Box<TraceForm>),
 }
 
 /// The snap under the cursor, remembered for the selection it was found for.
@@ -146,6 +152,7 @@ impl Asm {
                 _ => "SCREW",
             },
             Asm::Interference { .. } => "INTERFERENCE",
+            Asm::Trace(_) => "MOTION TRACE",
         }
     }
 
@@ -169,16 +176,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "joint.origin" => (Asm::JointOrigin { name: String::new(), hover: None }, vec![SelInput::new("Snap", SNAPS, false)]),
         "joint.rigid_group" => (Asm::RigidGroup, vec![SelInput::new("Components", BODIES, true)]),
         "joint.drive" => {
-            // The joint picked in the browser, else the first that moves.
-            let list = movable(s);
-            let picked = app
-                .tree
-                .picked_joints
-                .iter()
-                .find_map(|id| list.iter().copied().find(|i| s.doc.assembly.joints.get(*i).is_some_and(|j| j.id == *id)));
-            let joint = picked.or(list.first().copied()).unwrap_or(0);
+            let joint = picked_joint(app);
             (Asm::Drive { joint, values: current_values(s, joint), focus: true }, vec![])
         }
+        "motion.trace" => (Asm::Trace(Box::new(trace::form(s, picked_joint(app)))), vec![SelInput::new("Point", SNAPS, false)]),
         "joint.motion_link" => {
             let b = usize::from(movable(s).len() > 1);
             (Asm::MotionLink { a: 0, b, ia: 0, ib: 0, ratio: "1".into(), offset: "0".into() }, vec![])
@@ -232,6 +233,15 @@ pub fn preset(s: &Session, k: &mut Asm, p: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The joint picked in the browser, else the first that moves (an index into the design's joints).
+fn picked_joint(app: &SolveApp) -> usize {
+    let s = &app.session;
+    let list = movable(s);
+    let picked =
+        app.tree.picked_joints.iter().find_map(|id| list.iter().copied().find(|i| s.doc.assembly.joints.get(*i).is_some_and(|j| j.id == *id)));
+    picked.or(list.first().copied()).unwrap_or(0)
 }
 
 /// Indices (into the design's joints) of joints that move (not rigid).
@@ -343,7 +353,7 @@ fn pt(v: Vec3) -> Value {
 }
 
 /// The occurrence placing a body (0: the root design), when the body is its primary instance.
-fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
+pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
     let st = s.world_state();
     let b = st.body(body)?;
     let comp = s.doc.model_body_component(b);
@@ -691,6 +701,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 interference_rows(app, ui, r);
             }
         }
+        Asm::Trace(f) => enter |= trace::rows(app, ui, f, inputs),
     }
     enter
 }
@@ -905,6 +916,7 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         Asm::Coupling(f) => return crate::dialogs_coupling::commands(app, f, inputs),
         // The check runs from its Compute button; OK only closes.
         Asm::Interference { .. } => Vec::new(),
+        Asm::Trace(f) => cmd("motion.trace.keep", trace::params(s, f, inputs)?),
     })
 }
 
@@ -1052,11 +1064,15 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
         }
         return;
     }
-    // A joint names its two picks; a joint origin has one.
+    if let Asm::Trace(f) = k {
+        trace::overlay(painter, proj, f);
+    }
+    // A joint names its two picks; a joint origin and a trace have one.
     let two = matches!(k, Asm::Joint(_));
     let hover = match k {
         Asm::Joint(f) => Some(&mut f.hover),
         Asm::JointOrigin { hover, .. } => Some(hover),
+        Asm::Trace(f) => Some(&mut f.hover),
         _ => None,
     };
     let Some(hover) = hover else { return };

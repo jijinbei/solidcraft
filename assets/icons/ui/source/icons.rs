@@ -142,6 +142,19 @@ pub(crate) fn paint_with(p: &Painter, r: Rect, name: &str, ink: Color32, fill: C
     let pen = Pen { p, r, ink, fill, accent, w: (r.width() / 24.0 * 1.4).max(1.0) };
     let a = pen.accent;
     match name {
+        "cam_path" => {
+            pen.closed(&[(3.0, 4.0), (21.0, 4.0), (21.0, 20.0), (3.0, 20.0)], ink);
+            pen.line(&[(5.0, 7.0), (18.0, 7.0), (18.0, 11.0), (6.0, 11.0), (6.0, 15.0), (18.0, 15.0)], a);
+        }
+        "cam_generate" => {
+            pen.line(&[(3.0, 5.0), (10.0, 5.0), (10.0, 11.0), (3.0, 11.0), (3.0, 18.0), (10.0, 18.0)], ink);
+            pen.poly(&[(14.0, 5.0), (22.0, 12.0), (14.0, 19.0)], a, a);
+        }
+        "cam_verify" => {
+            pen.iso_box(2.0, 9.0, 9.0, 6.0, 7.0);
+            pen.line(&[(12.0, 16.0), (15.0, 19.0), (22.0, 9.0)], a);
+        }
+
         "sketch" => {
             pen.poly(&[(3.0, 14.0), (13.0, 9.0), (21.0, 13.0), (11.0, 18.0)], pen.fill, ink);
             pen.line(&[(7.0, 13.0), (16.0, 4.0), (18.0, 6.0), (9.0, 15.0), (6.5, 15.5), (7.0, 13.0)], a);
@@ -762,6 +775,20 @@ pub(crate) fn paint_with(p: &Painter, r: Rect, name: &str, ink: Color32, fill: C
             pen.closed(&[(21.0, 6.0), (15.0, 10.0), (15.0, 18.0), (21.0, 18.0)], a);
         }
         "sketch_circ_pattern" => paint(p, r, "pattern_circ", ink, Color32::TRANSPARENT, a),
+        "pattern_flip" => {
+            // Opposing arrows show reversal, with a short reference tick between them.
+            pen.arrow((4.0, 7.0), (20.0, 7.0), a);
+            pen.arrow((20.0, 17.0), (4.0, 17.0), ink);
+            pen.line(&[(12.0, 10.0), (12.0, 14.0)], ink);
+        }
+        "pattern_center" => {
+            // An original on a reference axis, with one equally spaced copy on either side.
+            pen.line(&[(12.0, 3.0), (12.0, 21.0)], a);
+            pen.line(&[(4.0, 12.0), (20.0, 12.0)], ink);
+            for x in [4.0, 12.0, 20.0] {
+                pen.circle(x, 12.0, 2.4, fill, if x == 12.0 { a } else { ink });
+            }
+        }
         "sketch_rect_pattern" => paint(p, r, "pattern_rect", ink, Color32::TRANSPARENT, a),
         "line_mid" => {
             pen.line(&[(3.0, 19.0), (21.0, 5.0)], a);
@@ -1278,6 +1305,14 @@ pub(crate) fn paint_with(p: &Painter, r: Rect, name: &str, ink: Color32, fill: C
             pen.dot(12.0, 12.0, ink);
             pen.arc(12.0, 12.0, 8.5, 0.3, 4.6, a);
             pen.arrow((11.0, 20.4), (14.5, 20.3), a);
+        }
+        // A crank on its pivot and the closed path its far end draws (accent).
+        "trace" => {
+            pen.curve([(15.0, 13.0), (22.0, 13.0), (23.0, 3.0), (15.0, 3.0)], a);
+            pen.curve([(15.0, 3.0), (8.0, 3.0), (9.0, 13.0), (15.0, 13.0)], a);
+            pen.line(&[(5.0, 20.0), (15.0, 13.0)], ink);
+            pen.circle(5.0, 20.0, 2.4, pen.fill, ink);
+            pen.dot(15.0, 13.0, a);
         }
         "motion_link" => {
             pen.circle(7.0, 14.0, 4.5, pen.fill, ink);

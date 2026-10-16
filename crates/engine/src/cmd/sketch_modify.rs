@@ -80,20 +80,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool; picking a text outline or linked point transforms its whole text source once, and copies remain editable text", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", mirror)
-        .at("SKETCH", "CREATE")
+        .at("SKETCH", "PATTERN")
         .icon("sketch_mirror")
         .enabled(in_sketch)
         .params(concat!("entities: [curve/point ids], line: mirror line id (symmetry constraints are added)", created_doc!())),
     CommandSpec::new("sketch.pattern.circular", "Circular Pattern", pattern_circular)
-        .at("SKETCH", "CREATE")
+        .at("SKETCH", "PATTERN")
         .icon("sketch_circ_pattern")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], center: [x,y] or point ref, count: 2…500, angle?: total deg (default 360). Adds associative pattern constraints; a coordinate center creates a constrainable point. Returns pattern and center ids. pattern?: existing pattern id to edit (omitted values retained; surviving instance ids retained)", created_doc!())),
+        .params(concat!("entities: [ids], center: [x,y] or point ref, count: 2…500, angle?: total deg (default 360); alignment?: left|center|right (default right); reversed?: bool (default false). Quantity includes the original. Center balances copies around it; reversed flips the direction and extra side for even totals. Partial arcs span angle with angle/(count-1) spacing; full turns use angle/count. Adds associative pattern constraints; a coordinate center creates a constrainable point. Returns pattern and center ids. pattern?: existing pattern id to edit (omitted values retained; surviving instance ids retained)", created_doc!())),
     CommandSpec::new("sketch.pattern.rectangular", "Rectangular Pattern", pattern_rect)
-        .at("SKETCH", "CREATE")
+        .at("SKETCH", "PATTERN")
         .icon("sketch_rect_pattern")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], dir?: [x,y] (default x), count, spacing; count2?, spacing2? (perpendicular direction). Adds associative pattern constraints. Returns pattern id. pattern?: existing pattern id to edit (omitted values retained; surviving instance ids retained)", created_doc!())),
+        .params(concat!("entities: [ids], count, spacing; count2?, spacing2?; direction?, direction2?: sketch line ids (live references); dir?, dir2?: [x,y] vectors (defaults: sketch x, perpendicular to direction 1); alignment?, alignment2?: left|center|right (default right). Signed spacings reverse each direction. reversed?, reversed2?: bool (default false); reverses placement and the extra side of even centered totals. Quantities include the original. Adds associative pattern constraints. Returns pattern id. pattern?: existing pattern id to edit (omitted values retained; surviving instance ids retained)", created_doc!())),
 ];
 
 const TOL: f64 = 1e-7;
@@ -1193,7 +1193,7 @@ fn offset_length(s: &Session, p: &Value, key: &str, positive: bool) -> Result<(f
     let cmd = "sketch.offset";
     let expression = match num(p, key) {
         Some(v) => format!("{v} mm"),
-        None => expr(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be a length expression")))?,
+        None => expr(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be a length expression")))?.into_string(),
     };
     let expression = s.doc.with_design_unit(&expression, solidcraft_doc::expr::Kind::Length);
     let value = s.doc.eval(&expression, solidcraft_doc::expr::Kind::Length)?;
@@ -1700,6 +1700,9 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         for (o, n) in &map {
             if o != n {
                 cons.push(add_c(sk, ConstraintKind::Symmetric { p: *o, q: *n, l })?);
+            } else if !sk.curves.get(l).is_some_and(|curve| curve.kind.point_ids().contains(o)) {
+                // A shared endpoint must stay on the mirror line as the source changes.
+                cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: *o, c: l })?);
             }
         }
         for (o, n) in cs.iter().zip(&made) {

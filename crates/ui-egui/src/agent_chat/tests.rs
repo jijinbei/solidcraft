@@ -303,3 +303,456 @@ fn the_agents_own_questions_are_answered_by_the_mode_or_asked() {
     on_permission(&mut app, 3, "Run ls".into(), opts());
     assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { .. })), "remembered");
 }
+
+// ---- Messages typed while the agent works ----
+
+use std::sync::Mutex;
+
+/// A backend that records what the panel asks of it, and reports what the test pushes.
+#[derive(Clone, Default)]
+struct Script {
+    calls: Arc<Mutex<Vec<String>>>,
+    events: Arc<Mutex<Vec<Event>>>,
+}
+
+impl Script {
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+    fn report(&self, e: Event) {
+        self.events.lock().unwrap().push(e);
+    }
+}
+
+impl ChatBackend for Script {
+    fn poll(&mut self) -> Vec<Event> {
+        std::mem::take(&mut *self.events.lock().unwrap())
+    }
+    fn prompt(&mut self, parts: &[PromptPart]) {
+        let text = parts.iter().find_map(|p| if let PromptPart::Text(t) = p { Some(t.clone()) } else { None }).unwrap_or_default();
+        self.calls.lock().unwrap().push(format!("prompt: {text}"));
+    }
+    fn cancel(&mut self) {
+        self.calls.lock().unwrap().push("cancel".into());
+    }
+    fn new_session(&mut self) {
+        self.calls.lock().unwrap().push("new_session".into());
+    }
+    fn set_model(&mut self, model: &str) {
+        self.calls.lock().unwrap().push(format!("set_model: {model}"));
+    }
+    fn answer_permission(&mut self, _: u64, _: Option<&str>) {}
+    fn authenticate(&mut self, _: &str) {}
+    fn shutdown(&mut self, _: bool) {}
+}
+
+/// An app whose agent is scripted and ready.
+fn app_with_script() -> (SolveApp, Script, egui::Context) {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    let script = Script::default();
+    app.agent_chat.backend = Some(Box::new(script.clone()));
+    app.agent_chat.state = Some(State::Ready);
+    (app, script, egui::Context::default())
+}
+
+fn ended(script: &Script, reason: &str) {
+    script.report(Event::TurnEnded { reason: reason.into() });
+}
+
+fn texts(app: &SolveApp) -> Vec<String> {
+    app.agent_chat.pending.iter().map(|p| p.text.clone()).collect()
+}
+
+/// While the agent works a message is queued, not dropped and not sent; it is not in the
+/// transcript as a sent message, but waits as a pending one that can be edited and removed.
+#[test]
+fn a_message_typed_while_busy_is_queued() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "make a box".into());
+    assert_eq!(app.agent_chat.state(), State::Busy);
+    send(&mut app, &ctx, "then a cylinder".into());
+    send(&mut app, &ctx, "   ".into());
+    send(&mut app, &ctx, "and a sphere".into());
+    assert_eq!(texts(&app), ["then a cylinder", "and a sphere"]);
+    assert_eq!(script.calls(), ["prompt: make a box"], "nothing else was sent");
+    let users = app.agent_chat.items.iter().filter(|i| matches!(i, Item::User { .. })).count();
+    assert_eq!(users, 1, "queued messages are not sent messages yet");
+    // Remove one; edit the other.
+    remove_pending(&mut app, 0);
+    assert_eq!(texts(&app), ["and a sphere"]);
+    app.agent_chat.pending[0].text = "and a cone".into();
+    assert_eq!(app.agent_chat.waiting(), 0);
+    assert!(status(&app)["pending"][0]["text"] == "and a cone");
+}
+
+/// When the turn ends normally the queue goes as the next prompt, all messages in order in one.
+#[test]
+fn the_queue_is_sent_when_the_turn_ends() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "first".into());
+    send(&mut app, &ctx, "second".into());
+    send(&mut app, &ctx, "third".into());
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert_eq!(script.calls(), ["prompt: first", "prompt: second\n\nthird"]);
+    assert!(app.agent_chat.pending.is_empty());
+    assert_eq!(app.agent_chat.state(), State::Busy, "the next turn is under way");
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::User { text, .. }) if text == "second\n\nthird"));
+    // Nothing queued: the end of the turn just ends it.
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+    assert_eq!(script.calls().len(), 2);
+}
+
+/// Stop does not send the queue by itself; it stays, with a Send that sends it later.
+#[test]
+fn stop_keeps_the_queue() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "first".into());
+    send(&mut app, &ctx, "later".into());
+    cancel(&mut app);
+    assert_eq!(script.calls(), ["prompt: first", "cancel"]);
+    ended(&script, "cancelled");
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+    assert_eq!(texts(&app), ["later"], "still queued");
+    assert_eq!(script.calls().len(), 2, "not sent");
+    // Send (the bubble's button) sends it, without the interruption note.
+    send_now(&mut app, &ctx);
+    assert_eq!(script.calls(), ["prompt: first", "cancel", "prompt: later"]);
+    assert!(app.agent_chat.pending.is_empty());
+}
+
+/// Send now: cancel first, the prompt only after the agent has ended the cancelled turn, with a
+/// note that the previous step was interrupted (shown without it in the conversation).
+#[test]
+fn send_now_cancels_then_sends_with_a_note() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "build a gearbox".into());
+    send(&mut app, &ctx, "use 12 teeth instead".into());
+    send_now(&mut app, &ctx);
+    assert_eq!(script.calls(), ["prompt: build a gearbox", "cancel"], "cancel alone, the prompt waits for the end");
+    poll(&mut app, &ctx);
+    assert_eq!(script.calls().len(), 2);
+    ended(&script, "cancelled");
+    poll(&mut app, &ctx);
+    assert_eq!(script.calls(), ["prompt: build a gearbox".to_string(), "cancel".into(), format!("prompt: {INTERRUPT_NOTE}\n\nuse 12 teeth instead")]);
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::User { text, .. }) if text == "use 12 teeth instead"));
+    // Stop after Send now wins: nothing more is sent by itself.
+    send(&mut app, &ctx, "one more".into());
+    send_now(&mut app, &ctx);
+    cancel(&mut app);
+    ended(&script, "cancelled");
+    poll(&mut app, &ctx);
+    assert_eq!(texts(&app), ["one more"]);
+}
+
+/// The steered message also goes after a turn that ended by itself just before the cancel arrived.
+#[test]
+fn send_now_after_the_turn_already_ended_still_sends() {
+    let (mut app, script, ctx) = app_with_script();
+    send(&mut app, &ctx, "a".into());
+    send(&mut app, &ctx, "b".into());
+    send_now(&mut app, &ctx);
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert_eq!(script.calls().last().map(String::as_str), Some("prompt: b"), "no note: nothing was interrupted");
+}
+
+/// What an interrupted turn changed undoes as one step, and the steered message starts its own.
+#[test]
+fn an_interrupted_turns_changes_undo_as_one_step() {
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    let before = app.session.doc.clone();
+    let depth = app.session.undo.len();
+    send(&mut app, &ctx, "two boxes".into());
+    let replies: Vec<_> = [0.0, 20.0].into_iter().map(|x| ask(&tx, "engine.execute", boxed(x))).collect();
+    frame(&mut app);
+    for r in replies {
+        assert_eq!(r.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    send(&mut app, &ctx, "stop, make it one".into());
+    send_now(&mut app, &ctx);
+    ended(&script, "cancelled");
+    poll(&mut app, &ctx);
+    assert_eq!(app.session.undo.len(), depth + 1, "the interrupted message is one step");
+    let n = app.agent_chat.items.iter().rposition(|i| matches!(i, Item::Changes { steps: 2, .. })).expect("its changes are listed");
+    // The steered message is on its own turn.
+    assert!(app.agent_chat.turn.as_ref().is_some_and(|t| t.label.contains("stop, make it one") && t.changes == 0));
+    undo_changes(&mut app, n);
+    assert!(Arc::ptr_eq(&app.session.doc, &before));
+}
+
+/// The same with a real agent process speaking ACP: `session/cancel` goes out, the agent answers
+/// the held prompt with the cancelled stop reason, and only then does the queued text go as a new
+/// `session/prompt`.
+#[cfg(unix)]
+#[test]
+fn send_now_with_an_acp_agent_sends_cancel_then_the_prompt() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-steer-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("received.log");
+    // A fake agent: answers initialize and session/new; holds a prompt whose text says "slow"
+    // until it gets session/cancel (then answers it "cancelled"); answers other prompts at once.
+    let script = r#"
+log="$1"; held=""
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s1"}}\n' "$id" ;;
+    *'"method":"session/prompt"'*)
+      case "$line" in
+        *slow*) held="$id" ;;
+        *) printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+      esac ;;
+    *'"method":"session/cancel"'*)
+      if [ -n "$held" ]; then printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"cancelled"}}\n' "$held"; held=""; fi ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.state = Some(State::Starting);
+    let ctx = egui::Context::default();
+    let until = |app: &mut SolveApp, what: &str, done: &dyn Fn(&SolveApp) -> bool| {
+        let t = std::time::Instant::now();
+        while !done(app) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(20), "timed out waiting for {what}");
+            poll(app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    until(&mut app, "the agent to be ready", &|a| a.agent_chat.state() == State::Ready);
+    send(&mut app, &ctx, "slow job".into());
+    send(&mut app, &ctx, "do this instead".into());
+    assert_eq!(texts(&app), ["do this instead"]);
+    send_now(&mut app, &ctx);
+    until(&mut app, "the steered turn to finish", &|a| a.agent_chat.state() == State::Ready && a.agent_chat.pending.is_empty());
+    let methods: Vec<String> = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter_map(|v| {
+            let m = v["method"].as_str()?.to_string();
+            let text = v.pointer("/params/prompt/0/text").and_then(Value::as_str).unwrap_or("");
+            Some(if text.is_empty() { m } else { format!("{m}: {text}") })
+        })
+        .collect();
+    assert_eq!(
+        methods,
+        [
+            "initialize".to_string(),
+            "session/new".into(),
+            "session/prompt: slow job".into(),
+            "session/cancel".into(),
+            format!("session/prompt: {INTERRUPT_NOTE}\n\ndo this instead"),
+        ]
+    );
+    disconnect(&mut app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// New chat: the running message is stopped, the transcript and the queue are cleared, a fresh
+/// session starts on the same agent, the mode stays, and the design's undo history is untouched.
+#[test]
+fn new_chat_clears_everything_and_keeps_the_agent_and_mode() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.modes = vec![("plan".into(), "Plan".into()), ("code".into(), "Code".into())];
+    app.agent_chat.mode = "plan".into();
+    app.agent_chat.agent_id = Some("claude".into());
+    let depth = app.session.undo.len();
+    assert!(!new_chat_needs_confirm(&app));
+    send(&mut app, &ctx, "first".into());
+    send(&mut app, &ctx, "queued".into());
+    assert!(new_chat_needs_confirm(&app), "a running message and a queue ask first");
+    new_chat(&mut app);
+    assert_eq!(script.calls(), ["prompt: first", "cancel", "new_session"]);
+    assert!(app.agent_chat.items.is_empty() && app.agent_chat.pending.is_empty());
+    assert_eq!(app.agent_chat.state(), State::Starting);
+    assert_eq!(app.agent_chat.agent_id.as_deref(), Some("claude"));
+    // The cancelled message's late end is not reported; the fresh session is ready again.
+    ended(&script, "cancelled");
+    script.report(Event::Modes { current: "code".into(), available: vec![] });
+    script.report(Event::Ready { agent: "fake".into(), images: false });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Ready);
+    assert!(app.agent_chat.items.is_empty(), "no notice about the old message");
+    assert_eq!(app.agent_chat.mode, "plan", "the mode is kept");
+    assert_eq!(app.session.undo.len(), depth);
+    assert!(!new_chat_needs_confirm(&app));
+}
+
+/// With a real ACP agent, New chat sends `session/new` on the same process (no restart).
+#[cfg(unix)]
+#[test]
+fn new_chat_with_an_acp_agent_opens_a_new_session_on_the_same_process() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-new-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("received.log");
+    let script = r#"
+log="$1"; n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
+    *'"method":"session/new"'*) n=$((n+1)); printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s%s"}}\n' "$id" "$n" ;;
+    *'"method":"session/prompt"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id" ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.state = Some(State::Starting);
+    let ctx = egui::Context::default();
+    let until = |app: &mut SolveApp, done: &dyn Fn(&SolveApp) -> bool| {
+        let t = std::time::Instant::now();
+        while !done(app) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(20), "timed out");
+            poll(app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    send(&mut app, &ctx, "hello".into());
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    assert!(!app.agent_chat.items.is_empty());
+    let pid = app.agent_chat.backend.as_ref().and_then(|b| b.pid());
+    new_chat(&mut app);
+    assert!(app.agent_chat.items.is_empty());
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    assert_eq!(app.agent_chat.backend.as_ref().and_then(|b| b.pid()), pid, "same process");
+    send(&mut app, &ctx, "again".into());
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    let log_text = std::fs::read_to_string(&log).unwrap();
+    let methods: Vec<String> =
+        log_text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|v| v["method"].as_str().map(String::from)).collect();
+    assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/new", "session/prompt"]);
+    assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s2\"")), "the prompt goes to the new session: {log_text}");
+    disconnect(&mut app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn models_reply(current: &str) -> Event {
+    let m = |id: &str| acp::ModelInfo { id: id.into(), name: id.to_uppercase(), description: String::new() };
+    Event::Models { current: current.into(), available: vec![m("fast"), m("smart")] }
+}
+
+/// Choosing a model tells the agent, shows it as current and remembers it for this agent; a model
+/// the agent did not offer is ignored.
+#[test]
+fn choosing_a_model_sets_it_and_remembers_it() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "claude".into();
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert!(models_shown(&app));
+    assert_eq!(app.agent_chat.model, "fast");
+    set_model(&mut app, "smart");
+    set_model(&mut app, "nonsense");
+    assert_eq!(script.calls(), ["set_model: smart"]);
+    assert_eq!(app.agent_chat.model, "smart");
+    assert_eq!(app.preferences.agent_models.get("claude").map(String::as_str), Some("smart"));
+    assert_eq!(status(&app)["model"], "smart");
+    // The agent switching its own model is shown too.
+    script.report(Event::Models { current: "fast".into(), available: vec![] });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(app.agent_chat.models.len(), 2, "the list stays");
+}
+
+/// The next session puts back the model chosen last time, when the agent offers it.
+#[test]
+fn the_remembered_model_is_set_on_the_next_session() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.agent_models.insert("claude".into(), "smart".into());
+    script.report(models_reply("fast"));
+    script.report(Event::Ready { agent: "fake".into(), images: false });
+    poll(&mut app, &ctx);
+    assert_eq!(script.calls(), ["set_model: smart"]);
+    assert_eq!(app.agent_chat.model, "smart");
+    // Already on it, or no longer offered: nothing is sent.
+    script.report(models_reply("smart"));
+    script.report(Event::Ready { agent: "fake".into(), images: false });
+    poll(&mut app, &ctx);
+    app.preferences.agent_models.insert("claude".into(), "gone".into());
+    script.report(models_reply("fast"));
+    script.report(Event::Ready { agent: "fake".into(), images: false });
+    poll(&mut app, &ctx);
+    assert_eq!(script.calls().len(), 1);
+}
+
+/// An agent that reports no models gets no picker; another agent's choice is not applied to it.
+#[test]
+fn an_agent_without_models_shows_no_picker() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "other".into();
+    app.preferences.agent_models.insert("claude".into(), "smart".into());
+    script.report(Event::Ready { agent: "fake".into(), images: false });
+    poll(&mut app, &ctx);
+    assert!(!models_shown(&app));
+    assert!(script.calls().is_empty());
+    assert_eq!(status(&app)["models"], json!([]));
+}
+
+/// With a real ACP agent the choice goes out as `session/set_model` with the session and model.
+#[cfg(unix)]
+#[test]
+fn set_model_goes_to_an_acp_agent() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-model-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("received.log");
+    let script = r#"
+log="$1"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s1","models":{"currentModelId":"fast","availableModels":[{"modelId":"fast","name":"Fast"},{"modelId":"smart","name":"Smart"}]}}}\n' "$id" ;;
+    *'"method":"session/set_model"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id" ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.state = Some(State::Starting);
+    app.agent_chat.running_id = "fake".into();
+    app.preferences.agent_models.insert("fake".into(), "smart".into());
+    let ctx = egui::Context::default();
+    let t = std::time::Instant::now();
+    loop {
+        poll(&mut app, &ctx);
+        let logged = std::fs::read_to_string(&log).unwrap_or_default();
+        if logged.contains("session/set_model") {
+            break;
+        }
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "no set_model: {logged}");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(models_shown(&app) && app.agent_chat.model == "smart", "the remembered model was put back");
+    let logged = std::fs::read_to_string(&log).unwrap();
+    let set: Value = logged.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|v| v["method"] == "session/set_model").unwrap();
+    assert_eq!(set["params"], json!({"sessionId": "s1", "modelId": "smart"}));
+    // A choice made in the picker goes out too.
+    set_model(&mut app, "fast");
+    let t = std::time::Instant::now();
+    while std::fs::read_to_string(&log).unwrap_or_default().matches("session/set_model").count() < 2 {
+        assert!(t.elapsed() < std::time::Duration::from_secs(20));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    disconnect(&mut app);
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -181,6 +181,45 @@ pub(crate) fn modifier_motion(
     })
 }
 
+/// View keys (#1541): the arrows turn the view 15° (with Shift a quarter turn, as the navigation
+/// cube's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
+/// selected face, plane or sketch. Not while a menu, the command box or a focused widget has the
+/// arrows. Returns whether the key was used.
+pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, mods: egui::Modifiers) -> bool {
+    use egui::Key;
+    let menu_open = egui::Popup::is_any_open(ctx)
+        || app.viewport.context_menu.is_some()
+        || app.ui.palette_open
+        || ctx.memory(|m| m.focused().is_some())
+        || ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open")).is_some());
+    let ctrl = mods.command || mods.ctrl;
+    if mods.alt || menu_open {
+        return false;
+    }
+    if key == Key::Num8 && ctrl && !mods.shift {
+        crate::viewport::look_at_selection(app);
+        return true;
+    }
+    let (action, dx, dy) = match key {
+        Key::ArrowLeft => ("left", -1.0, 0.0),
+        Key::ArrowRight => ("right", 1.0, 0.0),
+        Key::ArrowUp => ("up", 0.0, -1.0),
+        Key::ArrowDown => ("down", 0.0, 1.0),
+        _ => return false,
+    };
+    if ctrl {
+        // The model moves with the arrow, as it does under a pan drag.
+        if let Some(rect) = app.viewport.rect {
+            let step = rect.height() * 0.1;
+            camera_motion(app, rect, json!({"motion": "pan", "delta": [dx * step, dy * step]}));
+        }
+    } else {
+        let degrees = if mods.shift { 90.0 } else { 15.0 };
+        let _ = app.run("view.navigate", json!({"camera": app.cam, "action": action, "degrees": degrees}));
+    }
+    true
+}
+
 /// Continuous camera changes use the same JSON command as programmatic callers.
 pub(crate) fn camera_motion(app: &mut SolveApp, rect: Rect, mut params: serde_json::Value) {
     let stored_fov = app.cam.fov;
@@ -833,5 +872,48 @@ mod tests {
         let still = app.cam;
         super::device(&mut app, page, super::NavCaps::MODEL);
         assert_eq!(app.cam, still);
+    }
+}
+
+#[cfg(test)]
+mod view_key_tests {
+    use crate::scenario::Harness;
+    use serde_json::json;
+
+    fn turned(h: &mut Harness, key: serde_json::Value) -> (f64, f64) {
+        let before = h.app.cam;
+        h.step(&key).unwrap();
+        h.frames(2);
+        (h.app.cam.yaw - before.yaw, h.app.cam.pitch - before.pitch)
+    }
+
+    /// #1541: the arrows turn the view 15°, Shift+arrows a quarter turn, Ctrl+arrows pan, and none
+    /// of them is a shortcut a command can take.
+    #[test]
+    fn arrow_keys_turn_and_pan_the_view() {
+        let mut h = Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
+        h.frames(3);
+        let close = |a: f64, b: f64| (a.abs() - b.to_radians()).abs() < 1e-6;
+        let (yaw, pitch) = turned(&mut h, json!({"key": "ArrowLeft"}));
+        assert!(close(yaw, 15.0) && close(pitch, 0.0), "Left turns 15°: {yaw} {pitch}");
+        let (yaw, pitch) = turned(&mut h, json!({"key": "ArrowUp"}));
+        assert!(close(yaw, 0.0) && close(pitch, 15.0), "Up turns 15° over: {yaw} {pitch}");
+        let (yaw, _) = turned(&mut h, json!({"key": "ArrowRight", "shift": true}));
+        assert!(close(yaw, 90.0), "Shift+Right is a quarter turn: {yaw}");
+        let (before, angles) = (h.app.cam.target, (h.app.cam.yaw, h.app.cam.pitch));
+        h.step(&json!({"key": "ArrowRight", "cmd": true})).unwrap();
+        h.frames(2);
+        assert_ne!(h.app.cam.target, before, "Ctrl+Right pans");
+        assert_eq!((h.app.cam.yaw, h.app.cam.pitch), angles, "and does not turn");
+        for k in [egui::Key::ArrowLeft, egui::Key::ArrowRight, egui::Key::ArrowUp, egui::Key::ArrowDown] {
+            for mods in [egui::Modifiers::NONE, egui::Modifiers::SHIFT, egui::Modifiers::COMMAND] {
+                let name = crate::keymap::key_name(k, mods);
+                assert!(crate::keymap::RESERVED.contains(&name.as_str()), "{name} must be reserved");
+            }
+        }
+        assert!(crate::keymap::RESERVED.contains(&crate::keymap::key_name(egui::Key::Num8, egui::Modifiers::COMMAND).as_str()));
     }
 }

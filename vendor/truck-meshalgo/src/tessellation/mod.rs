@@ -509,3 +509,24 @@ impl<C: PolylineableCurve, S: RobustMeshableSurface> RobustMeshableShape
 }
 
 mod triangulation;
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub use triangulation::include_test_hooks;
+
+mod boundary_index;
+#[allow(dead_code)]
+mod verification;
+
+/// Fixed physical chord tolerance; refinement exhaustion and non-finite samples return None.
+pub fn robust_triangulation_checked<C: PolylineableCurve, S: RobustMeshableSurface>(
+    shell: &Shell<Point3, C, S>, tol: f64,
+) -> Option<Shell<Point3, PolylineCurve, Option<PolygonMesh>>> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    if !tol.is_finite() || tol <= 0.0 { return None; }
+    let unresolved = AtomicBool::new(false);
+    #[cfg(not(target_arch = "wasm32"))]
+    let result = verification::shell_tessellation(shell, tol, verification::by_search_nearest_parameter, Some(&unresolved));
+    #[cfg(target_arch = "wasm32")]
+    let result = verification::shell_tessellation_single_thread(shell, tol, verification::by_search_nearest_parameter, Some(&unresolved));
+    (!unresolved.load(Ordering::Relaxed)).then_some(result)
+}

@@ -1211,8 +1211,61 @@ pub fn solve(doc: &Document, st: &ModelState) -> Solution {
 pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
     let asm = &doc.assembly;
     let mut sol = Solution::default();
-    let joints: Vec<&Joint> = asm.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
     let mut vals = joint_values(asm);
+    let Built { tree, mut placed, closing, mut dof } = build(doc, st, &vals, &mut sol);
+    let mut stuck = BTreeSet::new();
+    if !closing.is_empty() {
+        (sol.values, stuck) = close_loops(&tree, &closing, asm, held, &mut vals);
+        if !sol.values.is_empty() {
+            placed = tree.place(&vals);
+        }
+    }
+    for id in &closing {
+        let Some(j) = tree.joints.get(id) else { continue };
+        let (Some(ta), Some(tb)) = (placed.get(&j.a.occurrence), placed.get(&j.b.occurrence)) else { continue };
+        let (Some(want), Some((_, fb))) = (tree.step(*id, true, ta, &vals), tree.frames.get(id)) else { continue };
+        // Measured at the joint, where the loop solver closes it.
+        let (dt, da) = mismatch(&mat_mul(&want, fb), &mat_mul(tb, fb));
+        if dt > 1e-6 || da > 1e-8 {
+            sol.conflicts.push((
+                j.id,
+                j.name.clone(),
+                format!("off by {dt:.4} mm and {:.3}° from the placement the other joints give", da.to_degrees()),
+            ));
+        } else if stuck.contains(id) {
+            // It meets there, but the loop would have to come apart on the way (a rocker
+            // driven a full turn ends where it started).
+            sol.conflicts.push((j.id, j.name.clone(), "the loop can't stay closed on the way to these values".into()));
+        }
+    }
+    if !closing.is_empty() {
+        loop_dof(&tree, &closing, asm, &vals, &mut dof);
+    }
+    for o in &doc.occurrences {
+        dof.entry(o.id).or_insert(6);
+    }
+    placed.remove(&0);
+    sol.world = placed;
+    sol.dof = dof;
+    sol
+}
+
+/// The joint graph laid out for a solve: the tree, where it places each occurrence for the
+/// values it was built with, the joints that close loops, and each occurrence's degrees of
+/// freedom along the tree.
+struct Built<'a> {
+    tree: Tree<'a>,
+    placed: BTreeMap<u64, Mat>,
+    closing: Vec<u64>,
+    dof: BTreeMap<u64, usize>,
+}
+
+/// Lay out the joint graph: the spanning tree out from the fixed occurrences (the root, grounded
+/// ones; with neither involved, the first joint's A side) and the joints left over, which close
+/// loops. Joints whose origins can't be resolved go to `sol.errors`; `sol.fixed` is set.
+fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Solution) -> Built<'a> {
+    let asm = &doc.assembly;
+    let joints: Vec<&Joint> = asm.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
     // Joint frames in component coordinates (errors leave the joint out).
     let mut frames: BTreeMap<u64, (Mat, Mat)> = BTreeMap::new();
     for j in &joints {
@@ -1270,7 +1323,7 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
             if placed.contains_key(&other) {
                 continue;
             }
-            let Some(m) = tree.step(j.id, from_a, &t, &vals) else { continue };
+            let Some(m) = tree.step(j.id, from_a, &t, vals) else { continue };
             used.insert(j.id);
             placed.insert(other, m);
             tree.parent.insert(other, (occ, j.id, from_a));
@@ -1279,48 +1332,15 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
             queue.push_back(other);
         }
     }
-    // Joints that close loops: move the loops' values to meet them, then check they agree.
+    // Joints that close loops: the solve moves the loops' values to meet them, then checks they
+    // agree.
     let closing: Vec<u64> = joints
         .iter()
         .filter(|j| !used.contains(&j.id) && tree.frames.contains_key(&j.id))
         .filter(|j| placed.contains_key(&j.a.occurrence) && placed.contains_key(&j.b.occurrence))
         .map(|j| j.id)
         .collect();
-    let mut stuck = BTreeSet::new();
-    if !closing.is_empty() {
-        (sol.values, stuck) = close_loops(&tree, &closing, asm, held, &mut vals);
-        if !sol.values.is_empty() {
-            placed = tree.place(&vals);
-        }
-    }
-    for id in &closing {
-        let Some(j) = tree.joints.get(id) else { continue };
-        let (Some(ta), Some(tb)) = (placed.get(&j.a.occurrence), placed.get(&j.b.occurrence)) else { continue };
-        let (Some(want), Some((_, fb))) = (tree.step(*id, true, ta, &vals), tree.frames.get(id)) else { continue };
-        // Measured at the joint, where the loop solver closes it.
-        let (dt, da) = mismatch(&mat_mul(&want, fb), &mat_mul(tb, fb));
-        if dt > 1e-6 || da > 1e-8 {
-            sol.conflicts.push((
-                j.id,
-                j.name.clone(),
-                format!("off by {dt:.4} mm and {:.3}° from the placement the other joints give", da.to_degrees()),
-            ));
-        } else if stuck.contains(id) {
-            // It meets there, but the loop would have to come apart on the way (a rocker
-            // driven a full turn ends where it started).
-            sol.conflicts.push((j.id, j.name.clone(), "the loop can't stay closed on the way to these values".into()));
-        }
-    }
-    if !closing.is_empty() {
-        loop_dof(&tree, &closing, asm, &vals, &mut dof);
-    }
-    for o in &doc.occurrences {
-        dof.entry(o.id).or_insert(6);
-    }
-    placed.remove(&0);
-    sol.world = placed;
-    sol.dof = dof;
-    sol
+    Built { tree, placed, closing, dof }
 }
 
 impl Document {
@@ -1367,6 +1387,10 @@ impl Document {
         Ok(mat_mul(&t, &f))
     }
 }
+
+#[path = "joints_reach.rs"]
+mod reach;
+pub use reach::{REACH_TOL, Reach, Reached, reach};
 
 /// The frame matrix for an explicit origin / z / x (public for commands).
 pub fn frame_of(o: Vec3, z: Vec3, x: Option<Vec3>) -> Option<Mat> {

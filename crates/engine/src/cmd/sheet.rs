@@ -4,6 +4,8 @@
 use serde_json::{Value, json};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::sheet::{self, SheetBody, SheetRule};
+use solidcraft_doc::{BodyName, SketchId};
+use solidcraft_doc::{FacePick, Position};
 use solidcraft_doc::{FeatureKind, FlangeEdge};
 use solidcraft_geom::{Vec2, Vec3};
 
@@ -110,7 +112,7 @@ fn flange_edges(s: &Session, p: &Value, cmd: &str) -> Result<Vec<FlangeEdge>> {
             return Err(bad(cmd, format!("edges[{i}]: unknown key `{k}` (an edge takes point, angle and height)")));
         }
         let point = o.get("point").and_then(vec3).ok_or_else(|| bad(cmd, format!("edges[{i}]: `point` must be [x, y, z]")))?;
-        let own = |k: &str, kind: Kind| -> Result<Option<String>> {
+        let own = |k: &str, kind: Kind| -> Result<Option<solidcraft_doc::Expr>> {
             if o.get(k).is_none_or(Value::is_null) {
                 return Ok(None);
             }
@@ -118,7 +120,7 @@ fn flange_edges(s: &Session, p: &Value, cmd: &str) -> Result<Vec<FlangeEdge>> {
             check_expr(s, &e, kind, cmd, &format!("edges[{i}].{k}"))?;
             Ok(Some(e))
         };
-        edges.push(FlangeEdge { point, angle: own("angle", Kind::Angle)?, height: own("height", Kind::Length)? });
+        edges.push(FlangeEdge { point: Position(point), angle: own("angle", Kind::Angle)?, height: own("height", Kind::Length)? });
     }
     Ok(edges)
 }
@@ -162,7 +164,11 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
         "base" => {
             let sketch = feature_sketch(s, p, cmd)?;
             let rule = rule_param(s, p, cmd)?;
-            add_feature(s, p, FeatureKind::SheetBase { sketch, profiles: profiles(p, cmd)?, rule, flip: bool_(p, "flip").unwrap_or(false) })
+            add_feature(
+                s,
+                p,
+                FeatureKind::SheetBase { sketch: SketchId(sketch), profiles: profiles(p, cmd)?, rule, flip: bool_(p, "flip").unwrap_or(false) },
+            )
         }
         "contour" => {
             let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
@@ -177,7 +183,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                 s,
                 p,
                 FeatureKind::SheetContour {
-                    sketch,
+                    sketch: SketchId(sketch),
                     curves,
                     distance,
                     rule,
@@ -225,7 +231,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     radius,
                     position,
                     flip: bool_(p, "flip").unwrap_or(false),
-                    body,
+                    body: body.map(BodyName),
                     corner_relief_shape,
                     corner_relief,
                 },
@@ -249,7 +255,7 @@ fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
     if pattern.as_deref().is_some_and(|t| t != "staggered" && t != "square") {
         return Err(bad(cmd, "`pattern` is \"staggered\" (60°, default) or \"square\""));
     }
-    add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body: str_(p, "body").map(str::to_string) })
+    add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body: str_(p, "body").map(BodyName::from) })
 }
 
 fn hem(s: &mut Session, p: &Value) -> Result<Value> {
@@ -264,7 +270,13 @@ fn hem(s: &mut Session, p: &Value) -> Result<Value> {
     add_feature(
         s,
         p,
-        FeatureKind::SheetHem { edges, length, gap, flip: bool_(p, "flip").unwrap_or(false), body: str_(p, "body").map(str::to_string) },
+        FeatureKind::SheetHem {
+            edges: edges.into_iter().map(Position).collect(),
+            length,
+            gap,
+            flip: bool_(p, "flip").unwrap_or(false),
+            body: str_(p, "body").map(BodyName::from),
+        },
     )
 }
 
@@ -311,7 +323,18 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
     let r = add_feature(
         s,
         p,
-        FeatureKind::SheetFold { sketch, curve, a, b, angle, radius, position, flip: bool_(p, "flip").unwrap_or(false), fixed, body },
+        FeatureKind::SheetFold {
+            sketch: sketch.map(SketchId),
+            curve,
+            a: Position(a),
+            b: Position(b),
+            angle,
+            radius,
+            position,
+            flip: bool_(p, "flip").unwrap_or(false),
+            fixed: fixed.map(Position),
+            body: body.map(BodyName),
+        },
     )?;
     // A recompute keeps a stored fold whose fixed point no longer touches the sheet (with a
     // warning); a new fold refuses one, since it picks no side (#263).
@@ -330,11 +353,11 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn unfold(s: &mut Session, p: &Value) -> Result<Value> {
-    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(str::to_string), refold: false })
+    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: false })
 }
 
 fn refold(s: &mut Session, p: &Value) -> Result<Value> {
-    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(str::to_string), refold: true })
+    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: true })
 }
 
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -355,7 +378,11 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("`{key}` is not a sheet.convert parameter: the sheet metal rule sets it. Pass a rule's name as `rule`")));
     }
     let rule = rule_param(s, p, cmd)?;
-    add_feature(s, p, FeatureKind::SheetConvert { body, face, rule, bends })
+    add_feature(
+        s,
+        p,
+        FeatureKind::SheetConvert { body: BodyName(body), face: FacePick(face), rule, bends: bends.into_iter().map(Position).collect() },
+    )
 }
 
 fn rules(s: &mut Session, p: &Value) -> Result<Value> {
@@ -386,7 +413,7 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
         ("gap", &mut rule.gap),
     ] {
         if let Some(e) = expr(p, k) {
-            *slot = e;
+            *slot = e.into();
         }
     }
     if let Some(shape) = p.get("corner_relief_shape").filter(|v| !v.is_null()) {

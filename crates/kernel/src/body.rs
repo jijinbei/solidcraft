@@ -1612,3 +1612,9 @@ mod display_mesh_tests;
 #[cfg(test)]
 #[path = "regularization_protection_tests.rs"]
 mod regularization_protection_tests;
+
+#[path = "body_verification.rs"]
+mod verification;
+#[cfg(test)]
+#[path = "body_verification_tests.rs"]
+mod verification_tests;

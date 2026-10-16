@@ -231,3 +231,21 @@ fn cut_copies_and_deletes_in_one_step_and_pastes_back_in_place() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(sketch(&s, sid), &before);
 }
+
+/// Parameters that are not a JSON object (a number, text, a list) are an error, not a panic:
+/// `sketch.cut` and `sketch.paste` add keys to a copy of the parameters, and serde_json panics
+/// when a key is set on anything but an object (#1536, found by `hostile_params_never_panic`).
+#[test]
+fn clipboard_commands_refuse_parameters_that_are_not_an_object() {
+    let (mut s, rect, _) = drawing();
+    run(&mut s, "sketch.copy", json!({"entities": [rect[0].clone()]}));
+    for id in ["sketch.cut", "sketch.copy", "sketch.paste"] {
+        for hostile in [json!(true), json!(-1), json!(1e308), json!("nope"), json!([]), json!([0, 0, 0]), json!([{"x": 1}])] {
+            let result = s.execute(id, &hostile);
+            assert!(!matches!(result, Err(crate::EngineError::Internal(..))), "{id} {hostile} panicked inside the command: {result:?}");
+            assert!(result.is_err(), "{id} {hostile} should be refused");
+        }
+    }
+    // Nothing was cut or pasted by the refused calls.
+    assert!(s.execute("sketch.paste", &json!({})).is_ok(), "the clipboard still holds the copy");
+}

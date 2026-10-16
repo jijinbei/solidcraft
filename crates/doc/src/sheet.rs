@@ -4257,7 +4257,9 @@ pub fn rename_plane_sheet_body(plane: &mut crate::PlaneRef, old: &str, new: &str
                 *name = renamed;
             }
         }
-        crate::PlaneRef::Offset { base, .. } | crate::PlaneRef::AtAngle { base, .. } => rename_plane_sheet_body(base, old, new),
+        crate::PlaneRef::Offset { base, .. } | crate::PlaneRef::AtAngle { base, .. } | crate::PlaneRef::Flipped { base, .. } => {
+            rename_plane_sheet_body(base, old, new)
+        }
         _ => {}
     }
 }
@@ -4267,7 +4269,9 @@ pub fn rename_plane_sheet_body(plane: &mut crate::PlaneRef, old: &str, new: &str
 pub fn plane_sheet_face(plane: &crate::PlaneRef) -> Option<&str> {
     match plane {
         crate::PlaneRef::Face { name: Some(name), anchor: None, .. } if split_sheet_face_name(name).is_some() => Some(name),
-        crate::PlaneRef::Offset { base, .. } | crate::PlaneRef::AtAngle { base, .. } => plane_sheet_face(base),
+        crate::PlaneRef::Offset { base, .. } | crate::PlaneRef::AtAngle { base, .. } | crate::PlaneRef::Flipped { base, .. } => {
+            plane_sheet_face(base)
+        }
         _ => None,
     }
 }

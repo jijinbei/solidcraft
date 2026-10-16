@@ -48,7 +48,16 @@ connections that send eight lines that are not JSON. At most 16 connections are 
 (further ones get `{"ok": false, "error": "too many connections"}`), at most 64 queued requests
 run per frame so a flood cannot starve drawing, and a request that the UI thread has not
 answered within 60 seconds (3600 seconds for `engine.batch`) is replied to with
-`{"ok": false, "error": "timeout"}`. The same 16 MiB line limit applies to the MCP server.
+`{"ok": false, "running": true, "error": "timeout: … is still running …"}`. The same 16 MiB line
+limit applies to the MCP server.
+
+A timed-out request has not failed: it is still running in the app and will still apply (a long
+fillet, say), so don't simply send it again. The connection keeps its reply (#1618). Ask for it
+with `control.pending`: `{"pending": <id>, "method": …, "done": false}` while it runs, then
+`{"pending": <id>, "method": …, "done": true, "reply": {…}}` (its own reply, once), and
+`{"pending": null}` when nothing is outstanding. Until it lands, any other request on that
+connection is refused at once with `{"ok": false, "busy": true, "error": "busy: …"}` and not
+run, so nothing is queued to apply unseen behind it.
 
 Any request's `params` may carry `allow_paths: ["/abs/folder", …]`: every file that request
 reads, writes or deletes (command paths such as `file.export`'s `path` or `doc.recovery_*`'s
@@ -135,7 +144,7 @@ labels; `prefs:measure_axis_distances` identifies the checkbox.
 | `ui.scroll` | `x`, `y`, `delta?` | wheel zoom at the cursor |
 | `ui.key` | `key` (egui key name, `Enter`, `Escape`…), `cmd?`, `shift?` | |
 | `ui.text` | `text` | typed text |
-| `ui.screenshot` | `path?` | PNG of the window (needs a presented frame) |
+| `ui.screenshot` | `path?` | PNG of the window (needs a presented frame: a minimised or fully covered window answers at once with `hidden: true` and an error; use `ui.render`) |
 | `ui.render` | `path`, `width?`, `height?`, `grid?`, `axes?` | Render of the model with the current camera (no window needed), drawn on the app's GPU device with the viewport's pipelines (the reply's `renderer`: `gpu`, or `gpu-software` on a software adapter), in the window's theme (light or dark; `solidcraft-cli snapshot` keeps the light colours); cut by the section the viewport shows (`inspect.section`, an open Section Analysis dialog's preview, a sketch's Slice), with the cut face capped. The ground grid and the origin's axes are drawn as the window shows them (`ui.set` `showGrid` and `showOrigin`, `hiddenOrigin`); `grid` and `axes` (booleans) say otherwise for this render |
 | `ui.confirm` | `accept?`: bool | answers the Delete confirmation (shown when a delete takes other features with it or makes some fail); without `accept`, what it lists |
 | `ui.documents` | `action?`: `new`, `switch`, `close`, `quit`; `index?`; `force?` (close without asking); `answer?`: `save`, `dont_save`, `cancel` (answers "save changes?") | the open designs (tabs): names, unsaved flags, the active one, a pending "save changes?" prompt, whether a quit is asking |
@@ -147,11 +156,11 @@ labels; `prefs:measure_axis_distances` identifies the checkbox.
 | `ui.capture` | `action?`: `capture`, `revert`, `cancel` | answers the Capture Position question (asked when a command starts or the design is saved while components were moved without capturing); without `action`, what waits |
 | `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar); close asks about unsaved designs first |
 | `ui.agent_cursor` | `show` (bool), `speed`: a number from 1 to 5 (times the normal speed) or `"instant"` (no animation: the command runs at once and the pointer jumps to where it acted), `follow_camera` (bool); all optional | the settings. While the cursor is shown, `engine.execute` first glides to the command's toolbar button and to each pick, then runs and replies; later requests wait their turn. `"animate": false` on a call skips it |
-| `ui.agent_chat` | `features?`, `toolbar_button?`, `permissions?` (`ask`, `edits`, `all`), `add_agent?` ({`name`, `kind`: `acp` or `api`, `command` or `base_url` + `model`}; no keys), `default_agent?`, `agent?` (the conversation's agent, by id), `mode?` (the agent's own mode), `open?`, `side?` (`left`, `right`), `minimized?`, `width?`, `picker?`, `refresh?`, `connect?`, `stop?`, `send?`: text, `attach_view?`, `permission?`: an option id or `"cancel"` (the newest question of the agent's own), `approve?`: true, false or `"always"` (the oldest request held for Allow/Deny), `cancel?`, `undo?` (the last message's changes) | the chat's state: `features`, `agents` (found and added), `currentAgent`, `state` (off, starting, ready, busy, auth, exited), `agent`, `modes`, `mode`, `authMethods`, `toolsPort`, `pid`, `waiting`, `turn`, `detection` and the conversation (`items`). With `features` off only the settings apply. Desktop only; see [Agent chat](agent-chat.md) |
+| `ui.agent_chat` | `features?`, `toolbar_button?`, `permissions?` (`ask`, `edits`, `all`), `add_agent?` ({`name`, `kind`: `acp` or `api`, `command` or `base_url` + `model`}; no keys), `default_agent?`, `agent?` (the conversation's agent, by id), `mode?` (the agent's own mode), `model?` (one of its models), `open?`, `side?` (`left`, `right`), `minimized?`, `width?`, `picker?`, `refresh?`, `connect?`, `stop?`, `send?`: text, `attach_view?`, `permission?`: an option id or `"cancel"` (the newest question of the agent's own), `approve?`: true, false or `"always"` (the oldest request held for Allow/Deny), `cancel?` (Stop: the queue stays), `send_now?` (stop the running step, then send the queued messages), `remove_pending?` (index), `new_chat?` (clear the chat, new session), `undo?` (the last message's changes) | the chat's state: `features`, `agents` (found and added), `currentAgent`, `state` (off, starting, ready, busy, auth, exited), `agent`, `modes`, `mode`, `models`, `model`, `authMethods`, `toolsPort`, `pid`, `waiting`, `turn`, `pending` (queued messages), `stopped`, `detection` and the conversation (`items`). With `features` off only the settings apply. Desktop only; see [Agent chat](agent-chat.md) |
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | `force?` (quit without asking about unsaved designs) | `quitting` (the window closes), `asking` (a "save changes?" prompt is open) |
 
-`ui.workspace {workspace?: "design" | "render"}` reads or changes the active workspace.
+`ui.workspace {workspace?: "design" | "render" | "manufacture"}` reads or changes the active workspace.
 Entering Render requires finishing the current modelling operation; returning restores
 the Design camera. See [the integrated Render workspace](render-workspace.md).
 

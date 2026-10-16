@@ -76,6 +76,12 @@ Changes:
 
 ## truck-meshalgo 0.4.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
+CAM uses a separate `tessellation/verification.rs` path adapted from the original
+fixed-tolerance triangulator. It propagates failed projection/refinement explicitly,
+retains a physical tolerance independent of display LOD, and uses an original bounded
+boundary candidate index plus Spade bulk loading. Display meshing remains unchanged.
+The adapter is exposed only through the guarded kernel verification-mesh API.
+
 Changes:
 - `tessellation/mod.rs`, `triangulation.rs`: a separate provisional `preview_face`
   path accepts at most 4,096 already sampled boundary points and a fixed grid of
@@ -135,8 +141,25 @@ Changes:
   stops refining a face's grid at 16 384 points. Each edge is still divided once for both its
   faces. `triangulation` and `robust_triangulation` divide by the chord tolerance alone, as
   before.
+- `analyzers/collision.rs`: the collision search builds each triangle's box once, filters the
+  sweep's open list by box overlap as it goes (it cloned the list for every triangle and built
+  both boxes for every pair), and runs the exact triangle tests on the rayon pool, in order
+  (sequential on wasm). Same collisions in the same order. The old search is kept as
+  `analyzers::collision_test_hooks`, behind a `test-hooks` feature that only
+  `solidcraft-kernel`'s tests turn on, and `crates/kernel/tests/mesh_collision_equivalence.rs`
+  compares the two.
+- `tessellation/triangulation.rs`: the inside test of a face's boundary also skips runs of 32
+  segments whose box, grown by the tolerance, the test's ray cannot meet. Same answers. The
+  old test is kept as `tessellation::include_test_hooks`, behind a `test-hooks` feature that
+  only `solidcraft-kernel`'s tests turn on, and `crates/kernel/tests/tess_include_equivalence.rs`
+  compares the two.
 - `lib.rs`: compiler warnings no longer fail the build. Example, test and bench targets are
   dropped (their sources are not vendored).
+- `tessellation/triangulation.rs`: adaptive division also splits a cell that bows off its
+  corners' plane by more than the chord tolerance (a quarter of its twist `p00 - p01 - p10 +
+  p11`, across that plane, at the middle). A bilinear patch equals the blend of its corners the
+  division compared against, so a twisted ruled face (a loft between polylines) went out as two
+  triangles per face (#1666); a flat cell such as a cone's trapezoid between rulings is not split.
 
 ## matext4cgmath 0.1.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/matext4cgmath)
 
@@ -159,6 +182,8 @@ SolidCraft changes:
 - `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,
   exposing the effective sample count so host paint callbacks can match it.
 - `src/winit.rs`: use that same effective count for depth and resolve attachments.
+- `src/renderer.rs`: when the GPU refuses a staging buffer for a frame's meshes (device lost
+  or out of memory), log a warning and draw nothing that frame instead of panicking (#1469).
 - Other backends retain requested MSAA, without another adapter or device probe.
 - `src/lib.rs`: clamp MSAA to the largest sample count the device supports for the surface and
   depth formats (`supported_msaa_samples`, `RenderState::msaa_supported`): a saved 8x on a

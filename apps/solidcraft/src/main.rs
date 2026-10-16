@@ -77,6 +77,9 @@ impl eframe::App for App {
         }
     }
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // Before the app's own hook, which adds the control channel's events.
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        self.space_mouse.raw_input_hook(self.solve.preferences.space_mouse_enabled, raw);
         self.solve.raw_input_hook(raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

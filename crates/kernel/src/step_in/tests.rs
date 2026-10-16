@@ -238,6 +238,20 @@ fn round_trip_features() {
     round_trip(&donut[0]);
 }
 
+/// Robustness seed 17: a thin three-quarter tube shelled with its bottom open. truck writes each
+/// wall as three quarter-turn B-spline pieces; the export merges them into one 270° face and must
+/// write that face's cylinder, not the first piece's quarter sheet. The seam direction came from
+/// the mean direction of the face's vertices, which is zero at 0°, 90°, 180° and 270°, so the
+/// merged face kept the quarter sheet and read back about 7% short with no warning.
+#[test]
+fn shelled_three_quarter_tube_round_trips() {
+    let rect =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(10.0, 0.0), Vec2::new(12.5, 0.0), Vec2::new(12.5, 27.5), Vec2::new(10.0, 27.5)]), holes: vec![] };
+    let tube = revolve(&Plane::XZ, &[rect], Vec2::ZERO, Vec2::Y, 1.5 * std::f64::consts::PI).unwrap().pop().unwrap();
+    let b = crate::shell(&tube, &[Vec3::new(-7.182422893157272, 7.182422893245109, 0.0)], 1.0).unwrap();
+    round_trip(&b);
+}
+
 #[test]
 fn several_bodies_and_names() {
     let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();

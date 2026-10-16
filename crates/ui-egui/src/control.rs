@@ -176,18 +176,21 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
 /// mode, the section the viewport shows: an open Section Analysis dialog's preview, a sketch's
 /// Slice), with the grid and the origin's axes as `guides` says.
 pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> solidcraft_engine::render::Scene {
-    solidcraft_engine::view::scene_with_palette_and_guides(
+    let mut scene = solidcraft_engine::view::scene_with_palette_and_guides(
         &app.session,
         &app.cam,
         crate::viewport::section_plane(app),
         solidcraft_engine::view::world_curve_parts,
         &crate::viewport::scene_palette(app.ui.dark, app.preferences.color_vision),
         guides,
-    )
+    );
+    crate::manufacturing::view::cpu(app, &mut scene);
+    crate::manufacturing::view::cpu_overlays(app, &mut scene);
+    scene
 }
 
 /// The grid and the origin's axes as the window shows them (the Grid and Origin switches).
-fn window_guides(app: &SolveApp) -> solidcraft_engine::view::Guides {
+pub(crate) fn window_guides(app: &SolveApp) -> solidcraft_engine::view::Guides {
     solidcraft_engine::view::Guides { grid: app.ui.show_grid && !crate::viewport::active_view(app).hide_grid, axes: app.origin_visible() }
 }
 
@@ -224,14 +227,20 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
     match method {
         "ui.workspace" => {
             if let Some(workspace) = s("workspace") {
-                if !matches!(workspace, "design" | "render") {
-                    return err("workspace must be design or render");
+                if !matches!(workspace, "design" | "render" | "manufacture") {
+                    return err("workspace must be design, render or manufacture");
                 }
                 if let Err(e) = crate::render_workspace::enter(app, workspace == "render") {
                     return err(e);
                 }
+                crate::manufacturing::cancel_editor(app);
+                if workspace != "render" {
+                    app.ui.tab = if workspace == "manufacture" { "MILLING" } else { "SOLID" }.into();
+                }
             }
-            ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
+            ok(
+                json!({"workspace":if crate::render_workspace::active(app) {"render"} else if app.ui.tab == "MILLING" {"manufacture"} else {"design"}}),
+            )
         }
         "engine.execute" | "command" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
@@ -267,6 +276,18 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
             "camera": app.cam,
             "tool": app.tool.as_ref().map(|t| t.cmd),
+            "manufacturing": {
+                "program": app.manufacturing.program,
+                "job": app.manufacturing.job,
+                "completed_motions": app.manufacturing.playback,
+                "finding": app.manufacturing.finding,
+                "playing": app.manufacturing.playing,
+                "workpiece": format!("{:?}", app.manufacturing.view.workpiece),
+                "fixtures": app.manufacturing.view.fixtures,
+                "paths": app.manufacturing.view.paths,
+                "stock_boundary": app.manufacturing.view.boundary,
+                "events_per_second": app.manufacturing.view.speed,
+            },
             "dialog": app.dialog.as_ref().map(|d| format!("{d:?}")),
             "status": app.status.as_ref().map(|(text, _, error)| json!({"text": text, "error": error})),
             "hover": app.viewport.hover.as_ref().map(|h| format!("{h:?}")),

@@ -242,6 +242,10 @@ fn paste_step(extent: f64) -> f64 {
 
 fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.paste";
+    // `p["sketch"] = …` below panics on anything but an object.
+    if !(p.is_object() || p.is_null()) {
+        return Err(bad(cmd, "params must be an object"));
+    }
     let Some(clip) = s.sketch_clipboard.clone() else { return Err(bad(cmd, "nothing copied (sketch.copy first)")) };
     let target = target_sketch(s, p, cmd)?;
     let positioned = p.get("at").is_some() || p.get("translate").is_some();

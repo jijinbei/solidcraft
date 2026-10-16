@@ -254,6 +254,17 @@ fn groups(t: &Tokens) -> Vec<Group> {
     let a = &t.analysis;
     let mut out = vec![
         group(
+            "manufacturing",
+            &[
+                ("cam_stock", t.cam_stock),
+                ("cam_fixture", t.cam_fixture),
+                ("cam_cut", t.cam_cut),
+                ("cam_rapid", t.cam_rapid),
+                ("cam_tool", t.cam_tool),
+            ],
+            &[("viewport_top", t.viewport_top), ("viewport_bottom", t.viewport_bottom)],
+        ),
+        group(
             "sketch lines",
             &[
                 ("sketch", t.sketch),
@@ -611,7 +622,9 @@ fn changed_fields(a: &Tokens, b: &Tokens) -> BTreeSet<String> {
 
 #[test]
 fn each_mode_changes_only_its_table() {
-    let set = |s: &[&str]| s.iter().map(|x| x.to_string()).collect::<BTreeSet<_>>();
+    let set = |s: &[&str]| {
+        s.iter().copied().chain(["cam_stock", "cam_fixture", "cam_cut", "cam_rapid", "cam_tool"]).map(str::to_string).collect::<BTreeSet<_>>()
+    };
     let red_green_both = [
         "triad",
         "gizmo",

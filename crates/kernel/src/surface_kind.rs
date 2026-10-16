@@ -165,6 +165,21 @@ impl FaceSurface {
     }
 }
 
+/// An inward cylindrical face's axis and radius. The caller still verifies the
+/// machined result against the complete target, including trimmed face bounds.
+pub fn hole_axis(b: &Body, face: usize, tolerance: f64) -> crate::Result<(Vec3, Vec3, f64)> {
+    if !tolerance.is_finite() || tolerance <= 0. {
+        return Err(crate::KernelError::Invalid("invalid hole tolerance".into()));
+    }
+    crate::guard("hole face axis", || {
+        let f = b.solid.face_iter().nth(face).ok_or_else(|| crate::KernelError::Invalid("hole face no longer exists".into()))?;
+        match surf_of(f, tolerance) {
+            Some(Surf::Cylinder { o, a, r, convex: false }) => Ok((o, a, r)),
+            _ => Err(crate::KernelError::Invalid("select an inward cylindrical hole face".into())),
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

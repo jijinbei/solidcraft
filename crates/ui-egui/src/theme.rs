@@ -207,6 +207,12 @@ pub struct Tokens {
     pub preview_sketch: Color32,
     /// Removed material in a feature preview (translucent).
     pub preview_cut: Color32,
+    // Manufacturing display.
+    pub cam_stock: Color32,
+    pub cam_fixture: Color32,
+    pub cam_cut: Color32,
+    pub cam_rapid: Color32,
+    pub cam_tool: Color32,
     /// Navigation cube faces, outline and labels.
     pub cube_face: Color32,
     pub cube_border: Color32,

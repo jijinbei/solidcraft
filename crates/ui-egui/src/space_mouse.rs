@@ -26,6 +26,34 @@ impl Axes {
     }
 }
 
+/// Seconds after the cap last moved that wheel events are still taken for 3DxWare's: one can be
+/// queued just before the cap stops and only reach the next frame.
+pub const WHEEL_QUIET_S: f64 = 0.15;
+
+/// 3DxWare turns the cap's motion into mouse-wheel turns for programs it has no profile for (its
+/// keyboard and mouse emulation), browsers included (#1336, #1380). Both apps read the cap
+/// themselves, so those are dropped: wheel events while the cap is moving and for
+/// [`WHEEL_QUIET_S`] after. 3DxWare sends them only well past the dead zone (from about a third
+/// of full deflection), never at rest, so a wheel turn with the cap at rest is the user's.
+#[derive(Debug, Default)]
+pub struct WheelGuard {
+    moved_at: Option<f64>,
+}
+
+impl WheelGuard {
+    /// Takes this frame's reading (`now` in seconds) and drops the frame's wheel events if they
+    /// are 3DxWare's.
+    pub fn filter(&mut self, moving: bool, now: f64, events: &mut Vec<egui::Event>) {
+        if moving {
+            self.moved_at = Some(now);
+        }
+        let recent = self.moved_at.is_some_and(|at| (0.0..=WHEEL_QUIET_S).contains(&(now - at)));
+        if recent {
+            events.retain(|e| !matches!(e, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_)));
+        }
+    }
+}
+
 /// Where one physical axis goes: its logical axis, and how.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisRule {
@@ -155,6 +183,19 @@ mod tests {
     }
 
     const PUSH: Axes = Axes { translation: [0, 350, 0], rotation: [0; 3] };
+
+    fn wheel(dy: f32) -> egui::Event {
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, dy),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        }
+    }
+
+    fn other() -> egui::Event {
+        egui::Event::PointerMoved(egui::pos2(1.0, 2.0))
+    }
 
     #[test]
     fn six_axes_move_the_camera_and_sketches_keep_their_orientation() {
@@ -347,5 +388,33 @@ mod tests {
         // motion, less than at 0.25.
         assert_eq!(distances[6], distances[5], "under 0.1 times is 0.1 times");
         assert!(distances[4] < distances[5] && distances[5] < app().cam.distance);
+    }
+
+    #[test]
+    fn wheel_turns_are_dropped_while_the_cap_moves_and_kept_at_rest() {
+        let mut guard = WheelGuard::default();
+        // At rest, the wheel is the user's.
+        let mut events = vec![wheel(100.0), other()];
+        guard.filter(false, 10.0, &mut events);
+        assert_eq!(events.len(), 2);
+        // Moving: 3DxWare's wheel (and a pinch zoom) goes; everything else stays.
+        let mut events = vec![wheel(-100.0), other(), egui::Event::Zoom(1.1), wheel(100.0)];
+        guard.filter(true, 11.0, &mut events);
+        assert_eq!(events, vec![other()]);
+        // Just after the cap stops, a queued one still goes.
+        let mut events = vec![wheel(100.0)];
+        guard.filter(false, 11.0 + WHEEL_QUIET_S - 0.01, &mut events);
+        assert!(events.is_empty());
+        // Later, the wheel is the user's again.
+        let mut events = vec![wheel(100.0)];
+        guard.filter(false, 11.0 + WHEEL_QUIET_S + 0.01, &mut events);
+        assert_eq!(events.len(), 1);
+        // A clock that goes back never swallows the user's wheel.
+        let mut events = vec![wheel(100.0)];
+        guard.filter(false, 5.0, &mut events);
+        assert_eq!(events.len(), 1);
+        let mut events = vec![wheel(100.0)];
+        guard.filter(false, f64::NAN, &mut events);
+        assert_eq!(events.len(), 1);
     }
 }

@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::expr::{self, Kind, ParamDef, Value};
+use crate::expr::{self, Expr, Kind, ParamDef, Value};
 use crate::walk::Walk;
 use crate::{DocError, Document, FeatureKind, MAX_PARAMS, Result};
 
@@ -23,7 +23,7 @@ pub(crate) enum ExprRole {
 
 impl FeatureKind {
     /// The feature's numeric inputs: (label, expression, kind), in a fixed order.
-    pub fn inputs_mut(&mut self) -> Vec<(&'static str, &mut String, Kind)> {
+    pub fn inputs_mut(&mut self) -> Vec<(&'static str, &mut Expr, Kind)> {
         let mut v = Vec::new();
         self.walk_exprs_mut(&mut |(label, e, kind, role)| {
             if role == ExprRole::Input {
@@ -38,7 +38,7 @@ impl FeatureKind {
         let mut v = Vec::new();
         self.walk_exprs(&mut |(label, e, kind, role)| {
             if role == ExprRole::Input {
-                v.push((label, e.clone(), kind));
+                v.push((label, e.to_string(), kind));
             }
         });
         v
@@ -47,7 +47,7 @@ impl FeatureKind {
     /// The coordinates of the points that place the feature: a primitive's position, an
     /// explicit plane's origin. They are not inputs (no parameter names), but follow
     /// parameters as inputs do.
-    pub fn placement_exprs_mut(&mut self) -> Vec<&mut String> {
+    pub fn placement_exprs_mut(&mut self) -> Vec<&mut Expr> {
         let mut v = Vec::new();
         self.walk_exprs_mut(&mut |(_, e, _, role)| {
             if role == ExprRole::Placement {
@@ -260,7 +260,7 @@ impl Document {
         if let Some(f) = next.features.get_mut(i)
             && let Some((_, e, _)) = f.kind.inputs_mut().into_iter().nth(k)
         {
-            *e = expr_s.clone();
+            *e = expr_s.clone().into();
         }
         if let Some(c) = comment {
             next.param_comments.insert(name.to_string(), c.to_string());
@@ -308,7 +308,7 @@ impl Document {
             if *target != normalized {
                 changed.insert(name.clone());
             }
-            *target = normalized;
+            *target = normalized.into();
         }
         let (_, errors) = next.param_values();
         for (name, error) in errors {
@@ -673,14 +673,14 @@ impl Document {
             for e in f.kind.placement_exprs_mut() {
                 let r = expr::rename_reference(e, old, new);
                 if r != *e {
-                    *e = r;
+                    *e = r.into();
                     n += 1;
                 }
             }
             for (_, e, _) in f.kind.inputs_mut() {
                 let r = expr::rename_reference(e, old, new);
                 if r != *e {
-                    *e = r;
+                    *e = r.into();
                     n += 1;
                 }
             }

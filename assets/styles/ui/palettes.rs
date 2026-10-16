@@ -46,6 +46,11 @@ impl Tokens {
             preview_add: Color32::from_rgb(112, 160, 226),
             preview_sketch: Color32::from_rgb(32, 190, 96),
             preview_cut: Color32::from_rgba_unmultiplied_const(232, 84, 44, 110),
+            cam_stock: Color32::from_rgb(166, 127, 65),
+            cam_fixture: Color32::from_rgb(150, 90, 180),
+            cam_cut: Color32::from_rgb(20, 110, 160),
+            cam_rapid: Color32::from_rgb(185, 115, 25),
+            cam_tool: Color32::from_rgb(40, 150, 70),
             cube_face: Color32::from_rgb(236, 239, 244),
             cube_border: Color32::from_rgb(85, 94, 110),
             cube_text: Color32::from_rgb(38, 42, 50),
@@ -141,6 +146,11 @@ impl Tokens {
         t.hover = Color32::from_rgb(54, 61, 74);
         t.hover_edge_halo = Color32::from_rgb(203, 203, 203);
         t.origin_point = Color32::from_rgb(214, 215, 218);
+        t.cam_stock = Color32::from_rgb(190, 154, 92);
+        t.cam_fixture = Color32::from_rgb(177, 119, 209);
+        t.cam_cut = Color32::from_rgb(50, 180, 240);
+        t.cam_rapid = Color32::from_rgb(230, 170, 65);
+        t.cam_tool = Color32::from_rgb(135, 220, 145);
         t.viewport_top = Color32::from_rgb(46, 52, 64);
         t.viewport_bottom = Color32::from_rgb(46, 52, 64);
         t.grid = Color32::from_rgb(59, 65, 76);
@@ -209,6 +219,12 @@ impl Tokens {
             t.bend_down = Color32::from_rgb(200, 120, 0);
             t.sketch_accent = Color32::from_rgb(60, 150, 105);
         }
+        // Use the measured five-colour semantic set for stock, fixtures and motions.
+        t.cam_stock = t.sketch_fixed;
+        t.cam_fixture = t.sketch_projected;
+        t.cam_cut = t.sketch;
+        t.cam_rapid = t.sketch_lost;
+        t.cam_tool = t.sketch_locked;
         t
     }
 
@@ -225,6 +241,12 @@ impl Tokens {
             t.sketch_locked = Color32::from_rgb(20, 165, 70);
             t.box_crossing = Color32::from_rgb(200, 60, 120);
         }
+        // Use the measured five-colour semantic set for stock, fixtures and motions.
+        t.cam_stock = t.sketch_fixed;
+        t.cam_fixture = t.sketch_projected;
+        t.cam_cut = t.sketch;
+        t.cam_rapid = t.sketch_lost;
+        t.cam_tool = t.sketch_locked;
         t
     }
 }

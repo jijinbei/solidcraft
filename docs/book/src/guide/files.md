@@ -91,6 +91,9 @@ in the file). It opens designs of every older format and upgrades them as they o
 from a newer version asks you to update instead of being guessed at. Development (nightly) builds
 save a format number no release reads yet.
 
+Sketch patterns retain their live direction-line references and placement settings when saved.
+Older patterns keep their fixed vector directions and original placement defaults.
+
 Upgrading keeps what a design meant. Designs keep recorded body transfers, explicit 3D curve coordinate
 spaces and certified face bindings, alongside semantic configuration styles, associative
 free-form offsets and cylindrical emboss selections. Older ownership maps, geometry and

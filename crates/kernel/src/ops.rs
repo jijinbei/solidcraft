@@ -817,6 +817,19 @@ fn boolean_whole(a: &Body, b: &Body, op: BoolOp) -> Result<Option<Body>> {
                 return Ok(Some(body));
             }
         }
+        // A prism tool whose target is a prism along its direction only round it (a pocket made
+        // deeper in a plate with a chamfered rim, a ring cut round a counterbored hole in a
+        // chamfered disc): the exact 2D route in a column cut round the tool. Its walls lying on
+        // the target's are what the tries below fail on.
+        if attempt == 1 && matches!(op, BoolOp::Cut | BoolOp::Intersect) {
+            let (local, diagnostics) = capture_boolean_diagnostics(|| crate::prism_local::local_prism_boolean(a, b, op));
+            if let Some(Ok(Some(body))) = local
+                && check(&body).0
+            {
+                merge(diagnostics);
+                return Ok(Some(body));
+            }
+        }
         let shift = mt::Vector3::new(j[0], j[1], j[2]) * (size * 0.01);
         for k in [2e-3, 5e-4] {
             let tol = (size * k).max(1e-5);

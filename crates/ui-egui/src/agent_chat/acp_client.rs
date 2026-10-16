@@ -17,6 +17,7 @@ enum Pending {
     Prompt,
     Authenticate,
     SetMode,
+    SetModel,
 }
 
 /// Variables the agent doesn't inherit: a control token set for the app's own `--control` port
@@ -90,6 +91,9 @@ impl AcpBackend {
                             if let Some((current, available)) = acp::modes(&v) {
                                 out.push(Event::Modes { current, available });
                             }
+                            if let Some((current, available)) = acp::models(&v) {
+                                out.push(Event::Models { current, available });
+                            }
                             out.push(Event::Ready { agent: self.agent.clone(), images: self.images });
                         }
                         None => out.push(Event::Error("session/new: no sessionId".into())),
@@ -100,7 +104,7 @@ impl AcpBackend {
                     }
                     // Signed in: try the session again.
                     (Pending::Authenticate, Ok(_)) => self.new_session(),
-                    (Pending::SetMode, Ok(_)) => {}
+                    (Pending::SetMode | Pending::SetModel, Ok(_)) => {}
                     (what, Err((code, message))) => {
                         let auth = code == acp::AUTH_REQUIRED || message.to_ascii_lowercase().contains("auth");
                         if auth {
@@ -128,6 +132,7 @@ impl AcpBackend {
             }
             Incoming::AuthStatus(s) => out.push(Event::AuthStatus(s)),
             Incoming::ModeChanged(m) => out.push(Event::Modes { current: m, available: Vec::new() }),
+            Incoming::ModelChanged(m) => out.push(Event::Models { current: m, available: Vec::new() }),
             Incoming::Unsupported { rpc, method } => {
                 self.proc.send(&acp::reply_error(rpc, acp::METHOD_NOT_FOUND, &format!("SolidCraft does not serve `{method}`")));
             }
@@ -178,6 +183,14 @@ impl ChatBackend for AcpBackend {
         }
     }
 
+    fn new_session(&mut self) {
+        if self.pending.values().any(|p| *p == Pending::Prompt) {
+            self.cancel();
+        }
+        self.session = None;
+        self.new_session();
+    }
+
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         if let Some(rpc) = self.permissions.remove(&key) {
             self.proc.send(&acp::permission_reply(rpc, option));
@@ -191,6 +204,12 @@ impl ChatBackend for AcpBackend {
     fn set_mode(&mut self, mode: &str) {
         if let Some(s) = self.session.clone() {
             self.request(Pending::SetMode, "session/set_mode", json!({"sessionId": s, "modeId": mode}));
+        }
+    }
+
+    fn set_model(&mut self, model: &str) {
+        if let Some(s) = self.session.clone() {
+            self.request(Pending::SetModel, "session/set_model", acp::set_model_params(&s, model));
         }
     }
 

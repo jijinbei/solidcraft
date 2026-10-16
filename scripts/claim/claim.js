@@ -223,8 +223,8 @@ async function unclaim(github, context) {
     await react(github, context, '+1'); // nothing to release
     return;
   }
-  if (assignees.includes(context.repo.owner)) {
-    await react(github, context, 'eyes'); // never touched by the bot
+  if (assignees.includes(context.repo.owner) && user !== context.repo.owner) {
+    await react(github, context, 'eyes'); // only the owner releases their own issues
     return;
   }
   const allowed = assignees.includes(user) || (await isMaintainer(github, context, user));

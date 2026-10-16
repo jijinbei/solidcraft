@@ -31,6 +31,20 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+C",
     "Ctrl+X",
     "Ctrl+V",
+    // View keys (`navigation::view_key`).
+    "Left",
+    "Right",
+    "Up",
+    "Down",
+    "Shift+Left",
+    "Shift+Right",
+    "Shift+Up",
+    "Shift+Down",
+    "Ctrl+Left",
+    "Ctrl+Right",
+    "Ctrl+Up",
+    "Ctrl+Down",
+    "Ctrl+8",
 ];
 
 #[derive(Default)]

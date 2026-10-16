@@ -610,9 +610,6 @@ fn shell_opened(b: &Body, healed: &Body, open: &[Vec3], opened: &[usize], thickn
     }
 }
 
-/// A shell made from the cavity with every face moved in by the thickness (open faces too),
-/// joined with each open face's moved copy swept out through the body. No history: the
-/// opening's walls, swept from the cavity's edges, come from nothing of `b`.
 /// The cavity with each open face pushed out (`cavity`), trimmed so that beyond an open face's
 /// plane it only reaches through the open face itself; `None` when it already does.
 ///
@@ -690,6 +687,9 @@ fn opening_overreach(healed: &Body, cavity: &Body, opened: &[usize], thickness: 
     Ok(Some(trimmed))
 }
 
+/// A shell made from the cavity with every face moved in by the thickness (open faces too),
+/// joined with each open face's moved copy swept out through the body. No history: the
+/// opening's walls, swept from the cavity's edges, come from nothing of `b`.
 fn shell_by_opening(b: &Body, opened: &[usize], thickness: f64, reach: f64) -> Result<Body> {
     let closed = offset_planar(b, |_, _| -thickness)?;
     let faces: Vec<mt::Face> = closed.solid.face_iter().cloned().collect();

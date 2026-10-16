@@ -16,17 +16,17 @@ use hidapi::{DeviceInfo, HidApi};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use solidcraft_ui_egui::SolveApp;
-use solidcraft_ui_egui::space_mouse::{Axes, AxisRule, DriverMapping, navigate_frame};
+use solidcraft_ui_egui::space_mouse::{Axes, AxisRule, DriverMapping, WheelGuard, navigate_frame};
 
 const STALE_AFTER: Duration = Duration::from_millis(150);
 const RETRY_AFTER: Duration = Duration::from_secs(2);
 const MAX_PROFILE_BYTES: u64 = 1024 * 1024;
 
-/// The mapping used when no 3DxWare profile is found. On Linux there is no 3DxWare, so it is what
-/// the driver applies by default in object mode (#1172). Elsewhere the driver writes a profile,
-/// and the raw axes are used until it does.
+/// The mapping used when no 3DxWare profile is found: what the driver applies by default in
+/// object mode. On Linux there is no 3DxWare (#1172); on Windows 3DxWare has no profile for
+/// SolidCraft until one is made, and the raw axes swap roll and spin (#1380).
 fn without_profile() -> DriverMapping {
-    if cfg!(target_os = "linux") { DriverMapping::object_mode() } else { DriverMapping::default() }
+    DriverMapping::object_mode()
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -320,6 +320,9 @@ pub struct SpaceMouse {
     last_frame: Instant,
     driver_mapping: DriverMapping,
     mapping_checked_at: Instant,
+    /// Drops 3DxWare's emulated wheel while the cap moves (#1380).
+    wheel: WheelGuard,
+    started: Instant,
 }
 
 impl SpaceMouse {
@@ -331,7 +334,25 @@ impl SpaceMouse {
         if let Err(error) = std::thread::Builder::new().name("solidcraft-3d-mouse".into()).spawn(move || reader(worker_ctx, worker_state)) {
             log::warn!("3D mouse: reader could not start: {error}");
         }
-        Self { shared, last_frame: now, driver_mapping: load_driver_mapping().unwrap_or_else(without_profile), mapping_checked_at: now }
+        Self {
+            shared,
+            last_frame: now,
+            driver_mapping: load_driver_mapping().unwrap_or_else(without_profile),
+            mapping_checked_at: now,
+            wheel: WheelGuard::default(),
+            started: now,
+        }
+    }
+
+    /// Before the app's own hook (which adds the control channel's events): with navigation on,
+    /// the wheel events 3DxWare makes from the cap's motion are dropped.
+    pub fn raw_input_hook(&mut self, enabled: bool, raw: &mut egui::RawInput) {
+        if !enabled {
+            return;
+        }
+        let now = Instant::now();
+        let moving = self.shared.lock().map(|reading| reading.current(now).moving()).unwrap_or(false);
+        self.wheel.filter(moving, now.duration_since(self.started).as_secs_f64(), &mut raw.events);
     }
 
     pub fn tick(&mut self, app: &mut SolveApp, ctx: &Context) {
@@ -428,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn without_a_profile_linux_uses_the_drivers_object_mode_axes() {
+    fn without_a_profile_the_drivers_object_mode_axes_are_used() {
         // 3DxWare's object-mode mapping, as a profile (#1172: confirmed on a SpaceMouse Compact).
         let object_mode = br#"
             <AppCfg><Devices><Device><AxisBank>
@@ -441,14 +462,11 @@ mod tests {
             </AxisBank></Device></Devices></AppCfg>
         "#;
         let profile = parse_driver_mapping(object_mode).expect("valid 3DxWare profile");
-        if cfg!(target_os = "linux") {
-            assert_eq!(without_profile(), profile);
-            // Tilting the cap rolls the view and twisting it spins it, as with the driver.
-            assert_eq!(rotation(without_profile(), [0, 350, 0]), [0.0, 0.0, -1.0]);
-            assert_eq!(rotation(without_profile(), [0, 0, 350]), [0.0, -1.0, 0.0]);
-        } else {
-            assert_eq!(without_profile(), DriverMapping::default());
-        }
+        // On every platform (#1172 on Linux, #1380 on Windows).
+        assert_eq!(without_profile(), profile);
+        // Tilting the cap rolls the view and twisting it spins it, as with the driver.
+        assert_eq!(rotation(without_profile(), [0, 350, 0]), [0.0, 0.0, -1.0]);
+        assert_eq!(rotation(without_profile(), [0, 0, 350]), [0.0, -1.0, 0.0]);
     }
 
     #[test]
@@ -476,6 +494,8 @@ mod tests {
             last_frame: now - Duration::from_millis(20),
             driver_mapping: DriverMapping::object_mode(),
             mapping_checked_at: now,
+            wheel: WheelGuard::default(),
+            started: now,
         };
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), solidcraft_ui_egui::Services::default());
         app.home.open = false;
@@ -483,5 +503,65 @@ mod tests {
         let DeviceMotion { motion, seconds } = app.viewport.device_motion.expect("the frame hands the page its motion");
         assert_eq!(motion, Motion { translation: [0.0; 3], rotation: [0.0, 0.0, -1.0] });
         assert!(seconds > 0.0);
+    }
+
+    fn wheel() -> egui::Event {
+        egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, -1.0),
+            modifiers: Default::default(),
+            phase: egui::TouchPhase::Move,
+        }
+    }
+
+    fn mouse(reading: Reading) -> SpaceMouse {
+        let now = Instant::now();
+        SpaceMouse {
+            shared: Arc::new(Mutex::new(reading)),
+            last_frame: now,
+            driver_mapping: DriverMapping::object_mode(),
+            mapping_checked_at: now,
+            wheel: WheelGuard::default(),
+            started: now,
+        }
+    }
+
+    #[test]
+    fn the_wheel_3dxware_makes_from_the_cap_is_dropped() {
+        // The cap tilted forward: 3DxWare also sends wheel turns (#1380). They are dropped.
+        let now = Instant::now();
+        let mut tilted = Reading::new(now);
+        tilted.axes.rotation = [-200, 0, 0];
+        let mut moving = mouse(tilted);
+        let mut raw = egui::RawInput { events: vec![wheel(), egui::Event::Zoom(1.1), egui::Event::Text("a".into())], ..Default::default() };
+        moving.raw_input_hook(true, &mut raw);
+        assert_eq!(raw.events, [egui::Event::Text("a".into())]);
+        // With navigation off, the wheel is the cap's only way to move the view: kept.
+        let mut raw = egui::RawInput { events: vec![wheel()], ..Default::default() };
+        moving.raw_input_hook(false, &mut raw);
+        assert_eq!(raw.events.len(), 1);
+        // The cap at rest: the wheel is the user's.
+        let mut resting = mouse(Reading::new(now));
+        let mut raw = egui::RawInput { events: vec![wheel()], ..Default::default() };
+        resting.raw_input_hook(true, &mut raw);
+        assert_eq!(raw.events.len(), 1);
+    }
+
+    #[test]
+    fn the_wheel_is_the_users_again_once_the_cap_has_been_still_a_moment() {
+        let mut tilted = Reading::new(Instant::now());
+        tilted.axes.rotation = [-200, 0, 0];
+        let mut cap = mouse(tilted);
+        let mut raw = egui::RawInput { events: vec![wheel()], ..Default::default() };
+        cap.raw_input_hook(true, &mut raw);
+        assert!(raw.events.is_empty(), "dropped while the cap moves");
+        // Let go, then wait out the quiet time.
+        if let Ok(mut reading) = cap.shared.lock() {
+            *reading = Reading::new(Instant::now());
+        }
+        std::thread::sleep(Duration::from_secs_f64(solidcraft_ui_egui::space_mouse::WHEEL_QUIET_S) + Duration::from_millis(60));
+        let mut raw = egui::RawInput { events: vec![wheel()], ..Default::default() };
+        cap.raw_input_hook(true, &mut raw);
+        assert_eq!(raw.events.len(), 1, "kept once the cap has been still");
     }
 }

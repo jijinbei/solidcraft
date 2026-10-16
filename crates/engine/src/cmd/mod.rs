@@ -21,6 +21,7 @@ macro_rules! planned {
 }
 
 mod browser;
+mod cam;
 mod clipboard;
 mod compare;
 mod component;
@@ -33,7 +34,7 @@ mod edit;
 mod face;
 mod features;
 mod features_more;
-pub use features::auto_operation;
+pub use features::{auto_operation, extrude_reach};
 mod component_link;
 mod config;
 mod file;
@@ -74,6 +75,8 @@ mod sketch_modify;
 mod sketch_project;
 mod surface;
 mod surface_analysis;
+mod surface_boundary;
+mod surface_match;
 mod view_dxf;
 mod view_navigation;
 
@@ -235,7 +238,9 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_canvas::COMMANDS.iter());
     v.extend(sketch_3d::COMMANDS.iter());
     v.extend(surface_analysis::COMMANDS.iter());
+    v.extend(surface_boundary::COMMANDS.iter());
     v.extend(surface::COMMANDS.iter());
+    v.extend(surface_match::COMMANDS.iter());
     v.extend(sketch_modify::COMMANDS.iter());
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
@@ -248,6 +253,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
     v.extend(motion::COMMANDS.iter());
+    v.extend(cam::COMMANDS.iter());
     v.extend(config::COMMANDS.iter());
     v.extend(parts::COMMANDS.iter());
     v.extend(browser::COMMANDS.iter());
@@ -317,4 +323,16 @@ fn edit_distance(a: &str, b: &str) -> usize {
         }
     }
     row[b.len()]
+}
+
+pub(super) fn alignment_param(p: &Value, key: &str, cmd: &str) -> Result<solidcraft_sketch::PatternAlignment> {
+    p.get(key).map_or(Ok(solidcraft_sketch::PatternAlignment::default()), |value| {
+        serde_json::from_value(value.clone()).map_err(|_| crate::params::bad(cmd, format!("`{key}` must be left, center or right")))
+    })
+}
+
+pub(super) fn reversed_param(p: &Value, key: &str, cmd: &str) -> Result<bool> {
+    p.get(key).map_or(Ok(false), |value| {
+        serde_json::from_value(value.clone()).map_err(|_| crate::params::bad(cmd, format!("`{key}` must be true or false")))
+    })
 }

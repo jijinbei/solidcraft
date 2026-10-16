@@ -767,7 +767,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, unknown_field_message(&field, &before, f.kind.type_name())));
     }
     if let FeatureKind::BodyTransfer { bodies, from, to, transform } = &nf.kind {
-        solidcraft_doc::validate_body_transfer(&s.doc, bodies, *from, *to, transform)?;
+        solidcraft_doc::validate_body_transfer(&s.doc, &solidcraft_doc::plain(bodies), *from, *to, transform)?;
         nf.component = *to;
     }
     if let (FeatureKind::Sketch { sketch: a, .. }, FeatureKind::Sketch { sketch: b, .. }) = (&nf.kind, &f.kind)
@@ -783,22 +783,22 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         && a != b
     {
         let before = s.model.state_before(id);
-        nf.edge_refs = solidcraft_doc::edge_refs(&before, body, a);
-        nf.edge_names = solidcraft_doc::edge_names_for(&before, body, a);
+        nf.edge_refs = solidcraft_doc::edge_refs(&before, body, &solidcraft_doc::plain(a));
+        nf.edge_names = solidcraft_doc::edge_names_for(&before, body, &solidcraft_doc::plain(a));
     }
     // New or reordered flange edges: their names now, so each edge's own angle and height stay
     // with the edge they were given for.
     if let (FeatureKind::SheetFlange { edges: a, .. }, FeatureKind::SheetFlange { edges: b, .. }) = (&nf.kind, &f.kind) {
         let points = |e: &[solidcraft_doc::FlangeEdge]| e.iter().map(|x| x.point).collect::<Vec<_>>();
         if points(a) != points(b) {
-            nf.edge_names = solidcraft_doc::sheet::sheet_edge_names(&s.model.state_before(id), &points(a));
+            nf.edge_names = solidcraft_doc::sheet::sheet_edge_names(&s.model.state_before(id), &solidcraft_doc::plain(&points(a)));
         }
     }
     // New bend edges for a conversion: the names of the body's edges there now.
     if let (FeatureKind::SheetConvert { bends: a, body, .. }, FeatureKind::SheetConvert { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
         && (a != b || body != was)
     {
-        nf.edge_names = solidcraft_doc::sheet::bend_edge_names(&s.model.state_before(id), body, a);
+        nf.edge_names = solidcraft_doc::sheet::bend_edge_names(&s.model.state_before(id), body, &solidcraft_doc::plain(a));
     }
     // Profiles picked by index or point are kept by their curves, as when the feature was made.
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
@@ -1045,7 +1045,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && before.body == after.body
         && before.path == after.path
         && before.author_path == after.author_path
-        && before.at.dist(after.at) < 1e-8
+        && before.at.dist(after.at.0) < 1e-8
     {
         *after = before.clone();
     }

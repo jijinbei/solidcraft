@@ -41,7 +41,28 @@ when you send a message or press **Connect**.
   unfold it. **Close** (×) hides the panel. Neither stops the agent; **Stop** does.
 - **The agent switcher** under the title picks the agent for this conversation; switching stops
   the one running. Next to it, when the agent has modes of its own (Claude Code has *Default*,
-  *Accept Edits*, *Plan*…), a second drop-down sets the agent's mode.
+  *Accept Edits*, *Plan*…), a second drop-down sets the agent's mode. When the agent reports its models (an ACP agent's
+  model list, or an endpoint's `/models`), a model drop-down shows the one in use and changes it;
+  SolidCraft remembers the last choice for each agent and puts it back on the next session. An
+  endpoint's agent also keeps it as its default model. An agent that reports no models shows no
+  drop-down.
+
+## Typing while the agent works
+
+The input stays enabled during a turn. **Enter** queues the message: it shows in the conversation
+as a **Queued** bubble that you can **Edit** or remove (×) until it is sent. Several queued
+messages go as one prompt, in order, when the turn ends normally.
+
+- **Send now** (on the bubble, or **Ctrl+Enter** / **Cmd+Enter** in the input) stops the current
+  step, waits for the agent to say it stopped, then sends the queue as the next prompt, with a
+  short note that the agent's previous step was interrupted. What the interrupted message changed
+  undoes as one step, like any other message.
+- **Stop** (the square next to the input, or **Esc** in the input) stops the agent and keeps
+  the queue: the bubbles wait for **Send**.
+- **New chat** (the header button, **Ctrl+Shift+L** / **Cmd+Shift+L** with the chat focused)
+  stops what runs, clears the conversation and the queue and starts a fresh session on the same
+  agent, keeping the agent and its mode. It asks first when a message is running or queued. The
+  design's undo history is untouched.
 
 ## Agents
 

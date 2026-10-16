@@ -1435,7 +1435,7 @@ mod tests {
             .add_feature(
                 FeatureKind::Extrude {
                     thin: None,
-                    sketch,
+                    sketch: crate::SketchId(sketch),
                     profiles: ProfileSel::All,
                     extent: Extent {
                         convention: crate::ExtrudeConvention::LegacyPerSide,
@@ -1445,9 +1445,9 @@ mod tests {
                         start_offset: None,
                         through_all: false,
                         taper: Some("0 deg".into()),
-                        to: Some(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0)),
+                        to: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0))),
                         to_offset: Some("offset + 1 mm".into()),
-                        from: Some(solidcraft_geom::Vec3::new(0.0, 0.0, 5.0)),
+                        from: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 5.0))),
                     },
                     operation: Operation::NewBody,
                     targets: vec![],
@@ -2077,7 +2077,7 @@ mod tests {
             "orientation": {"direction": [0.0, 1.0, 0.0]}, "twist": "90 deg", "scale": "0.5"});
         let k: FeatureKind = serde_json::from_value(new.clone()).unwrap();
         let FeatureKind::SurfaceSweep { orientation, .. } = &k else { panic!("{k:?}") };
-        assert_eq!(*orientation, SweepOrientation::Direction(solidcraft_geom::Vec3::Y));
+        assert_eq!(*orientation, SweepOrientation::Direction(crate::Dir(solidcraft_geom::Vec3::Y)));
         assert_eq!(serde_json::to_value(&k).unwrap(), new);
         let parallel: SweepOrientation = serde_json::from_value(serde_json::json!("parallel")).unwrap();
         assert_eq!(parallel, SweepOrientation::Parallel);

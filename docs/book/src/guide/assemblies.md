@@ -76,6 +76,21 @@ why. While it previews, a row under the values gives the value the joint reached
 status line repeats it. The value box keeps what you typed. The dialog opens on the joint
 picked in the browser, or on the first joint that moves when none is picked.
 
+**Drag a part that joints place** and it moves as far as its joints allow: the point you
+grabbed follows the pointer in the plane through it that faces the view, the joints on the
+part's chain take the values that bring it nearest, within their limits, through motion links,
+and with closed loops kept closed, and a four-bar's rocker stops at the end of its swing. The
+whole drag is one undo step. A grounded part, or one no joint places, is not moved; a drag on
+it draws a selection box as before. Each frame runs `joint.reach`, which scripts and agents use
+directly to put a part's point somewhere: `joint.reach {occurrence, point}` moves the joints on
+its chain from where they are to the nearest pose (the arm keeps its elbow up or down, and a
+linkage stays on its branch). `at` picks the part's point (the centre of its bodies by
+default), `z` with `axis` also turns one of its axes, and `joints` names the only joints to
+move (the other joints of a closed loop they are in follow). The answer says whether it
+`reached` the point and how close it got (`error_mm`, `error_deg`), and when it falls short,
+the limits it rests on (`stopped_by_limit`) or the loop that stopped it (`stopped_by_loop`).
+Contact sets are not checked by a reach; drive the joints for that.
+
 The solver places what it reaches from the root and from grounded components. A chain of joints
 that is joined to nothing grounded is never placed, so driving one of its joints moves nothing.
 The drive says so: `joint.drive` answers `moved: false` with a `reason` and the `unconnected`
@@ -90,6 +105,39 @@ by default: B's z axis is turned against A's, as two faces meet. `flip: true` li
 instead, so two origins given at one point with the same z stay as they are. For scripts that
 drive many steps, `quiet: true` leaves the per-part degrees of freedom out of joint answers, and
 `motion.play` with `quiet: true` gives the poses of only the parts that moved.
+
+**Motion Trace** (`motion.trace`, on the **ASSEMBLE** panel) draws the path a point of a part
+takes while a joint is driven or a motion study plays, such as the coupler curve of a four-bar.
+Pick the point on the part (a face centre, a circle centre, an edge midpoint or a vertex), then
+either a joint with the values to drive it from and to (a turn of the joint from where it is, at
+first) or a motion study. The path previews in the viewport as the mechanism would move: closed
+loops follow, and the path ends where a loop can no longer close or a contact set stops the
+motion, which the dialog says under the values. OK keeps the path as a 3D sketch spline in a new
+sketch of the root component (**Motion Trace1**, ...), where no joint moves it, and it can serve
+as a sweep or pipe path. It is a fixed curve: it
+does not follow later changes to the mechanism. A path that comes back to where it started is
+kept as a closed, smooth spline.
+`motion.trace {occurrence, point, joint, from, to, index?, samples?}` (or `{occurrence, point,
+study, samples?}`) answers the world points without changing the design, and
+`motion.trace.keep` with the same parameters (and `name?`) keeps them. A trace takes 2 to 500
+samples: 100 by default for a joint, one per step for a study.
+
+**Export Animation…** in the **Motion Study** dialog saves the study as an animated GIF, drawn
+from the viewport's camera as the study plays (the keys in the dialog count, even before OK).
+`motion.export_animation` does the same for scripts, the CLI and agents, without a window: give a
+`study`, or a `joint` with `from` and `to` (and `index?`) to animate a drive, and a `path`. A path
+ending in `.gif` gets an animated GIF that loops; any other path is a folder that gets the frames
+as `frame-0001.png`, `frame-0002.png`, and so on (made if missing; frames of a longer earlier
+export there are removed), for a video tool. The web app writes GIFs only. `samples` is
+the number of frames (one per step for a study by default, 100 for a joint), `width` and `height`
+their size in pixels (800 × 500 by default, at most 4096 a side), and `fps` the GIF's speed (20
+by default); `grid: false` and `axes: false` leave out the ground grid and the origin's axes.
+`camera` takes the reply of the control channel's `ui.camera` (or any of its fields;
+the rest come from the view `view.apply` chose, or the home view framing the model). The frames
+are drawn by the same renderer as `solidcraft-cli snapshot`, on a copy of the design, which is not
+changed. A GIF keeps one palette for all its frames, so colours don't flicker, and stores only
+what changed from one frame to the next. Frames are capped: at most 1000, and a GIF holds at most
+2^26 pixels of frames (about 160 frames of 800 × 500).
 
 **Insert Design** (`component.insert_design {path, translate?}`, on the **ASSEMBLE** panel and
 in the **File** menu) adds a component linked to another saved design, so each part can live in

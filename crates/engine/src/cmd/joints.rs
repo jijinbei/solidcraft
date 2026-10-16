@@ -36,6 +36,9 @@ pub static COMMANDS: &[CommandSpec] = &[
          reason: why the joint can move nothing (suppressed, its origins lost, or its chain joined to nothing grounded → unconnected: \
          the occurrence named)",
     ),
+    CommandSpec::new("joint.reach", "Reach Point", reach).params(
+        "occurrence: id|name; point: [x,y,z] (where its point goes, world); at?: [x,y,z] (its point, in the world where it is now; default: the centre of          its bodies' box); z?: [x,y,z] (the way its axis then points); axis?: [x,y,z] (that axis, in the world now; default: its own z); joints?: [ids          or names] (only these move toward the point; the other joints of a closed loop they are in follow); quiet?: bool; continuous?: bool (a frame          of a drag: the answer says continuous, and the app's command line doesn't echo it). Moves the values of the joints          on its chain from where they are to the nearest pose, within their limits, through motion links, keeping closed loops closed as joint.drive does          (contact sets are not checked) → reached; error_mm (and error_deg with z): how close it got; point: where its point is; values: [{joint, name,          values}] of the joints that moved, as joint.list gives them; moved; stopped_by_limit: [{joint, value, limit: min|max}]: the limits it rests on          short of the point; stopped_by_loop: {joint}: the closed loop that stopped it (its chain alone gets closer); reason: why nothing can move",
+    ),
     CommandSpec::new("joint.motion_link", "Motion Link", motion_link)
         .at("SOLID", "ASSEMBLE")
         .icon("motion_link")
@@ -302,8 +305,29 @@ fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin
         }
     };
     let o = JointOrigin { occurrence, snap };
-    joints::resolve_origin(&s.doc, &s.model.state(), &o).map_err(|e| bad(cmd, e.to_string()))?;
-    Ok(o)
+    match joints::resolve_origin(&s.doc, &s.model.state(), &o) {
+        Ok(_) => Ok(o),
+        // A circle given by its centre, where no face lies (#393).
+        Err(e) => match (what == "circle").then(|| circle_centre(s, occurrence, local(world))).flatten() {
+            Some(snap) => Ok(JointOrigin { occurrence, snap }),
+            None => Err(bad(cmd, e.to_string())),
+        },
+    }
+}
+
+/// The round end of a cylindrical face of the occurrence's bodies centred at `pick`: a point on
+/// its axis there, pointing out of that end (as picking its circular edge gives).
+fn circle_centre(s: &Session, occurrence: u64, pick: Vec3) -> Option<Snap> {
+    let component = if occurrence == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occurrence)?.component };
+    let st = s.model.state();
+    let c = st
+        .bodies
+        .iter()
+        .filter(|b| s.doc.model_body_component(b) == component)
+        .find_map(|b| solidcraft_doc::kernel::cylinder_end_at(&b.body, pick))?;
+    let along = (pick - c.axis_point).dot(c.axis);
+    let (at, dir) = if (along - c.start).abs() <= (c.end - along).abs() { (c.start, -1.0) } else { (c.end, 1.0) };
+    Some(Snap::Point { point: c.axis_point + c.axis * at, z: Some(c.axis * dir) })
 }
 
 pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
@@ -562,6 +586,111 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
+/// Joints `joint.reach` takes at most in `joints`.
+const MAX_REACH_JOINTS: usize = 1000;
+
+fn reach(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "joint.reach";
+    let occ = occurrence_id(s, p.get("occurrence"), cmd)?;
+    let given = |k: &str| p.get(k).and_then(vec3).filter(|v| v.is_finite() && v.len() < 1e9);
+    let to = given("point").ok_or_else(|| bad(cmd, "`point` must be [x, y, z]"))?;
+    let world = if occ == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occ) };
+    let inv = solidcraft_doc::mat_inverse(&world).ok_or_else(|| bad(cmd, "occurrence transform"))?;
+    let at = match p.get("at") {
+        Some(_) => solidcraft_doc::apply_point(&inv, given("at").ok_or_else(|| bad(cmd, "`at` must be [x, y, z]"))?),
+        None => body_centre(s, occ),
+    };
+    let unit = |k: &str| -> Result<Option<Vec3>> {
+        match p.get(k) {
+            None => Ok(None),
+            Some(_) => given(k).and_then(Vec3::normalized).map(Some).ok_or_else(|| bad(cmd, format!("`{k}` must be a direction [x, y, z]"))),
+        }
+    };
+    let (z, axis) = (unit("z")?, unit("axis")?);
+    if axis.is_some() && z.is_none() {
+        return Err(bad(cmd, "`axis` goes with `z`, the way it points"));
+    }
+    let axis = z.map(|z| (axis.map(|a| solidcraft_doc::apply_vector(&inv, a)).and_then(Vec3::normalized).unwrap_or(Vec3::Z), z));
+    let only = match p.get("joints") {
+        None => None,
+        Some(Value::Array(a)) if a.len() <= MAX_REACH_JOINTS => Some(a.iter().map(|v| joint_id(s, Some(v), cmd)).collect::<Result<BTreeSet<u64>>>()?),
+        Some(_) => return Err(bad(cmd, format!("`joints` must be a list of joints (ids or names), at most {MAX_REACH_JOINTS}"))),
+    };
+    let before = super::motion::positions(s);
+    let st = s.model.state();
+    let r = joints::reach(&s.doc, &st, &joints::Reach { occurrence: occ, point: at, to, axis, joints: only });
+    let reached = match &r {
+        Ok(x) => {
+            // Only a reach that moves something touches the design (and so adds an undo step).
+            if !x.values.is_empty() {
+                let doc = s.doc_mut();
+                for (id, q) in &x.values {
+                    if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == *id) {
+                        j.values.clone_from(q);
+                    }
+                }
+            }
+            x.clone()
+        }
+        Err(_) => joints::Reached::default(),
+    };
+    // Loops closed again from there, and where it ended up.
+    let sol = resolve(s);
+    let t = joints::occurrence_world(&s.doc, occ);
+    let got = solidcraft_doc::apply_point(&t, at);
+    let mut out = sol_json(&sol, p);
+    out["occurrence"] = json!(occurrence_name(s, occ));
+    out["point"] = json!([got.x, got.y, got.z]);
+    out["error_mm"] = json!(got.dist(to));
+    let mut there = got.dist(to) <= joints::REACH_TOL;
+    if let Some((a, z)) = axis {
+        // From the sine too: the cosine alone loses small angles to rounding.
+        let v = solidcraft_doc::apply_vector(&t, a);
+        let deg = v.cross(z).len().atan2(v.dot(z)).to_degrees();
+        out["error_deg"] = json!(deg);
+        there &= deg <= joints::REACH_TOL;
+    }
+    out["reached"] = json!(there);
+    let name = |id: u64| s.doc.assembly.joints.iter().find(|j| j.id == id);
+    // As joint.list gives them: with what motion links set.
+    let effective = joints::joint_values(&s.doc.assembly);
+    out["values"] = reached
+        .values
+        .keys()
+        .filter_map(|id| name(*id))
+        .map(|j| json!({"joint": j.id, "name": j.name, "values": named_values(j, effective.get(&j.id).unwrap_or(&j.values))}))
+        .collect();
+    out["moved"] = json!(super::motion::moved(&before, &super::motion::positions(s)).next().is_some());
+    out["stopped_by_limit"] = if reached.limits.is_empty() {
+        Value::Null
+    } else {
+        reached
+            .limits
+            .iter()
+            .filter_map(|(id, i, upper)| {
+                let j = name(*id)?;
+                Some(json!({"joint": j.name, "value": j.kind.dofs().get(*i), "limit": if *upper { "max" } else { "min" }}))
+            })
+            .collect()
+    };
+    out["stopped_by_loop"] = json!(reached.stopped_by_loop.and_then(name).map(|j| json!({"joint": j.name})));
+    if let Err(why) = r {
+        out["reason"] = json!(why);
+    }
+    if bool_(p, "continuous") == Some(true) {
+        out["continuous"] = json!(true);
+    }
+    Ok(out)
+}
+
+/// The centre of the box around an occurrence's bodies, in its own coordinates (its origin when
+/// it has none).
+fn body_centre(s: &Session, occ: u64) -> Vec3 {
+    let comp = s.doc.occurrences.iter().find(|o| o.id == occ).map(|o| o.component).unwrap_or(0);
+    let st = s.model.state();
+    st.bodies.iter().filter(|b| s.doc.model_body_component(b) == comp).fold(Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds())).center()
+}
+
 fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.motion_link";
     let (a, b) = (joint_id(s, p.get("a"), cmd)?, joint_id(s, p.get("b"), cmd)?);
@@ -591,7 +720,10 @@ fn size_param(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<Size> {
     match p.get(key) {
         Some(Value::Number(n)) => n.as_f64().map(Size::Length).ok_or_else(|| bad(cmd, format!("`{key}` must be a finite length"))),
         Some(Value::String(t)) if t.len() <= 1000 => Ok(Size::Expr(t.trim().to_string())),
-        Some(o @ Value::Object(m)) if m.contains_key("circle") => Ok(Size::Circle(origin_param(s, Some(o), cmd)?)),
+        Some(o @ Value::Object(m)) if m.contains_key("circle") => match origin_param(s, Some(o), cmd)? {
+            o @ JointOrigin { snap: Snap::CircleCenter { .. }, .. } => Ok(Size::Circle(o)),
+            _ => Err(bad(cmd, format!("`{key}`: give a point on the round face, not its centre"))),
+        },
         _ => Err(bad(cmd, format!("`{key}` must be a length (mm or an expression) or a round face ({{circle: [x, y, z]}})"))),
     }
 }
@@ -959,6 +1091,9 @@ fn overlapping_pairs(boxes: &[Aabb3], limit: usize) -> (Vec<(usize, usize)>, usi
     (pairs, skipped)
 }
 
+#[cfg(test)]
+#[path = "joints_reach_tests.rs"]
+mod reach_tests;
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;

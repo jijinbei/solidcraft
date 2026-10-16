@@ -92,6 +92,7 @@ fn swap_in(app: &mut SolveApp, slot: DocSlot) -> DocSlot {
     // Whatever was going on in the design leaves with it.
     crate::sketch_text_move::cancel_drag(app);
     crate::dialogs::cancel(app);
+    app.manufacturing = Default::default();
     crate::dim_view::cancel();
     app.tool = None;
     app.params = None;
@@ -166,6 +167,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
     if active_is_blank(app) {
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
+        app.manufacturing = Default::default();
         app.tool = None;
         app.menu.props = None;
         crate::sketch_attachment_ui::clear(app);
@@ -251,6 +253,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         crate::sketch_text_move::cancel_drag(app);
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
+        app.manufacturing = Default::default();
         app.tool = None;
         app.session.replace_design(Session::default());
         app.session.revision = rev + 1;

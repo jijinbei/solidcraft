@@ -348,6 +348,8 @@ pub struct Prefs {
     /// How much the agent may do without asking (`ask`, `edits`, `all`), and per agent.
     pub ai_permissions: crate::agent_chat::agents::Mode,
     pub agent_permissions: std::collections::BTreeMap<String, crate::agent_chat::agents::Mode>,
+    /// The model last chosen in the chat, per agent: put back when the agent offers it again.
+    pub agent_models: std::collections::BTreeMap<String, String>,
     /// "Always allow" answers: per agent, the tools it may use without asking.
     pub agent_always_allow: std::collections::BTreeMap<String, Vec<String>>,
     /// The side the panel docks on (`left` or `right`), its width, and whether it is folded to a strip.
@@ -435,6 +437,7 @@ impl Default for Prefs {
             agent_default: String::new(),
             ai_permissions: crate::agent_chat::agents::Mode::Edits,
             agent_permissions: Default::default(),
+            agent_models: Default::default(),
             agent_always_allow: Default::default(),
             agent_chat_side: "right".into(),
             agent_chat_width: 380.0,

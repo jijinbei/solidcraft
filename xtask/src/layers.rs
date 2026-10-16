@@ -39,6 +39,7 @@ pub const TABLE: &[(&str, Class)] = &[
     // the derive macros (proc-macro, no workspace dependencies)
     ("derive", Class::Standalone),
     ("sketch", Class::Layer(1)),
+    ("cam", Class::Layer(1)),
     ("kernel", Class::Layer(1)),
     ("render", Class::Layer(1)),
     ("doc", Class::Layer(2)),

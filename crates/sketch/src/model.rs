@@ -189,6 +189,9 @@ pub enum ConstraintKind {
         center: Option<usize>,
         angle: f64,
         offset: Vec2,
+        /// Displacements along and perpendicular to live sketch lines (at most two).
+        #[serde(default)]
+        directions: [Option<(usize, Vec2)>; 2],
     },
     /// The independent radius of a patterned circle or ellipse follows its seed.
     PatternRadius {
@@ -423,7 +426,9 @@ impl ConstraintKind {
     pub fn indices(&self) -> (Vec<usize>, Vec<usize>) {
         use ConstraintKind::*;
         match *self {
-            PatternPoint { p, q, center, .. } => (vec![p, q].into_iter().chain(center).collect(), vec![]),
+            PatternPoint { p, q, center, directions, .. } => {
+                (vec![p, q].into_iter().chain(center).collect(), directions.into_iter().flatten().map(|(l, _)| l).collect())
+            }
             PatternRadius { a, b } => (vec![], vec![a, b]),
             Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![p, q], vec![]),
             Distance { p, q, .. } | DistanceX { p, q, .. } | DistanceY { p, q, .. } => (vec![p, q], vec![]),
@@ -458,11 +463,14 @@ impl ConstraintKind {
             None => ok2 = false,
         };
         match self {
-            PatternPoint { p, q, center, .. } => {
+            PatternPoint { p, q, center, directions, .. } => {
                 fp(p);
                 fp(q);
                 if let Some(c) = center {
                     fp(c);
+                }
+                for (l, _) in directions.iter_mut().flatten() {
+                    fc(l);
                 }
             }
             PatternRadius { a, b } => {
@@ -848,7 +856,13 @@ impl Sketch {
         let need_line = |i: usize| if is_line(i) { Ok(()) } else { Err(SketchError::WrongKind(name(i), "needs a line".into())) };
         let need_round = |i: usize| if is_round(i) { Ok(()) } else { Err(SketchError::WrongKind(name(i), "needs a circle or arc".into())) };
         match *k {
-            PatternPoint { p, q, angle, offset, .. } => {
+            PatternPoint { p, q, angle, offset, directions, .. } => {
+                for (l, distance) in directions.into_iter().flatten() {
+                    need_line(l)?;
+                    if !distance.x.is_finite() || !distance.y.is_finite() || distance.x.abs() > MAX_COORD || distance.y.abs() > MAX_COORD {
+                        return Err(SketchError::Invalid("invalid pattern direction displacement".into()));
+                    }
+                }
                 if p == q
                     || !angle.is_finite()
                     || angle.abs() > std::f64::consts::TAU
@@ -1275,8 +1289,8 @@ impl Sketch {
     }
 
     /// Exact boundary segments of a free-form curve: ellipses as four conics, conics, fit
-    /// splines and control splines up to degree 3 as Béziers. None for other curves (and for
-    /// higher-degree splines, which stay polylines).
+    /// splines and control splines up to `MAX_BEZIER_DEGREE` as Béziers. None for other curves
+    /// (and for higher-degree splines, which stay polylines).
     pub fn exact_segs(&self, ci: usize) -> Option<Vec<Seg2>> {
         let cu = self.curves.get(ci)?;
         let pt = |i: &usize| self.point(*i);
@@ -1309,6 +1323,17 @@ impl Sketch {
                 Some(crate::curves::bspline_beziers(&p, k).iter().filter_map(|c| solidcraft_geom::bezier(c)).collect())
             }
             _ => None,
+        }
+    }
+
+    /// The exact [`Seg2`] pieces of a curve of any kind, in the curve's own direction of travel:
+    /// lines, circles and arcs from their analytic form, free-form curves through
+    /// [`Sketch::exact_segs`]. Empty for a curve with no exact pieces (a spline above
+    /// `solidcraft_geom::MAX_BEZIER_DEGREE`).
+    pub fn exact_pieces(&self, ci: usize) -> Vec<Seg2> {
+        match self.exact_segs(ci) {
+            Some(segs) => segs,
+            None => self.segs(ci),
         }
     }
 
@@ -1361,8 +1386,11 @@ impl Sketch {
                 "e"
             }
             CurveKind::Spline { pts, control, degree, periodic } => {
-                if pts.len() < 2 || pts.len() > crate::curves::MAX_SPLINE_POINTS || !(1..=7).contains(degree) {
-                    return Err(SketchError::Invalid("a spline needs 2 to 500 points and degree 1 to 7".into()));
+                if pts.len() < 2 || pts.len() > crate::curves::MAX_SPLINE_POINTS || !(1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(degree) {
+                    return Err(SketchError::Invalid(format!(
+                        "a spline needs 2 to 500 points and degree 1 to {}",
+                        solidcraft_geom::MAX_BEZIER_DEGREE
+                    )));
                 }
                 if *periodic {
                     if *control || *degree != 3 {

@@ -131,6 +131,22 @@ pub fn visible_bounds(s: &Session, sketches: bool) -> Aabb3 {
     b
 }
 
+/// The two axes (in the camera's Z-up frame) of the plane the grid lies in, for a view whose
+/// direction toward the eye is `back` (in that frame). The ground (frame XY) unless it is seen
+/// nearly edge-on, as in the Front or Right view; then the upright origin plane that faces the
+/// view more, so the grid stays visible (#1470).
+pub fn grid_plane(back: Vec3) -> (Vec3, Vec3) {
+    // About 11.5° above or below the ground.
+    const EDGE_ON: f64 = 0.2;
+    if back.z.abs() >= EDGE_ON || !back.z.is_finite() {
+        (Vec3::X, Vec3::Y)
+    } else if back.y.abs() >= back.x.abs() {
+        (Vec3::X, Vec3::Z)
+    } else {
+        (Vec3::Y, Vec3::Z)
+    }
+}
+
 /// Grid spacing (minor, major) for a view of the given half height.
 pub fn grid_step(half_height: f64) -> (f64, f64) {
     let raw = (half_height / 10.0).max(1e-3);
@@ -374,13 +390,15 @@ fn build_scene(
     };
     let b = bounds(s);
     sc.radius = (b.diagonal() * 0.5).max(cam.half_height()).max(10.0) + b.center().dist(cam.target);
-    // Grid on the ground plane (XY with Z up, XZ with Y up), drawn under the model as in the
-    // viewport.
+    // Grid on the ground plane (XY with Z up, XZ with Y up), or the upright origin plane facing
+    // a view that sees the ground edge-on ([`grid_plane`]), drawn under the model as in the viewport.
     if guides.grid {
         let (minor, major) = grid_step(cam.half_height());
         let ext = (cam.half_height() * 3.0 / major).ceil() * major;
         let tf = cam.to_frame(cam.target);
-        let c = Vec3::new((tf.x / major).round() * major, (tf.y / major).round() * major, 0.0);
+        let (u, v) = grid_plane(cam.to_frame(cam.back()));
+        let snap = |a: Vec3| a * ((tf.dot(a) / major).round() * major);
+        let c = snap(u) + snap(v);
         let w = |p: Vec3| cam.from_frame(p);
         let n = ((ext / minor) as i64).clamp(1, 400);
         for i in -n..=n {
@@ -389,8 +407,8 @@ fn build_scene(
             let col = if major_line { p.grid_major } else { p.grid };
             // The viewport's widths (pixels).
             let width = if major_line { 1.0 } else { 0.7 };
-            sc.grid.push(SceneLine { points: vec![w(c + Vec3::new(t, -ext, 0.0)), w(c + Vec3::new(t, ext, 0.0))], color: col, width, on_top: false });
-            sc.grid.push(SceneLine { points: vec![w(c + Vec3::new(-ext, t, 0.0)), w(c + Vec3::new(ext, t, 0.0))], color: col, width, on_top: false });
+            sc.grid.push(SceneLine { points: vec![w(c + u * t - v * ext), w(c + u * t + v * ext)], color: col, width, on_top: false });
+            sc.grid.push(SceneLine { points: vec![w(c - u * ext + v * t), w(c + u * ext + v * t)], color: col, width, on_top: false });
         }
     }
     // The origin's axes, each unless hidden one by one (`browser.visibility`), as in the viewport.

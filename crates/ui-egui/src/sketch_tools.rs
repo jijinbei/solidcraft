@@ -1050,7 +1050,9 @@ fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<us
     use solidcraft_engine::sketch::ConstraintKind::*;
     match *k {
         Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![], vec![p, q]),
-        PatternPoint { p, q, center, .. } => (vec![], vec![p, q].into_iter().chain(center).collect()),
+        PatternPoint { p, q, center, directions, .. } => {
+            (directions.into_iter().flatten().map(|(l, _)| l).collect(), vec![p, q].into_iter().chain(center).collect())
+        }
         PatternRadius { a, b } => (vec![a, b], vec![]),
         Fix { p } => (vec![], vec![p]),
         Midpoint { p, l } => (vec![l], vec![p]),

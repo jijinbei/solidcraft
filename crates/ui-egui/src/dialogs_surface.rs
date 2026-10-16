@@ -575,7 +575,7 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
 /// A tool as a selection again: a plane, else the face at the stored point.
 fn tool_sel(app: &SolveApp, plane: &PlaneRef, tool: Option<&FaceAt>) -> Option<Sel> {
     match tool {
-        Some(t) => crate::dialogs::face_sel(&app.session, t.point),
+        Some(t) => crate::dialogs::face_sel(&app.session, t.point.0),
         None => crate::dialogs::plane_sel(&app.session, plane),
     }
 }
@@ -584,7 +584,7 @@ fn tool_sel(app: &SolveApp, plane: &PlaneRef, tool: Option<&FaceAt>) -> Option<S
 /// `frame` maps the feature's component frame to the world, for an axis stored as a line.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let s = &app.session;
-    let edge = |p: &Vec3| crate::dialogs::edge_sel(s, *p);
+    let edge = |p: &solidcraft_engine::doc::Position| crate::dialogs::edge_sel(s, p.0);
     let (k, fill): (Surf, Vec<Vec<Sel>>) = match kind {
         FeatureKind::SurfaceRevolve { sketch, profiles, curves, axis, angle, angle2, symmetric } => {
             let (pick, stored) = match axis {
@@ -594,8 +594,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 AxisRef::Line { origin, dir } => (
                     None,
                     Some(json!({
-                        "origin": pt(solidcraft_engine::doc::apply_point(frame, *origin)),
-                        "dir": pt(solidcraft_engine::doc::apply_vector(frame, *dir))
+                        "origin": pt(solidcraft_engine::doc::apply_point(frame, origin.0)),
+                        "dir": pt(solidcraft_engine::doc::apply_vector(frame, dir.0))
                     })),
                 ),
             };
@@ -603,9 +603,9 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             if let Some(a2) = angle2 {
                 extra.insert("angle2".into(), json!(a2));
             }
-            let k = Surf::Revolve { angle: angle.clone(), symmetric: *symmetric, axis: stored };
+            let k = Surf::Revolve { angle: angle.to_string(), symmetric: *symmetric, axis: stored };
             let mut ins = inputs(&k);
-            for (inp, items) in ins.iter_mut().zip([sheet_sels(app, *sketch, profiles.as_ref(), curves), pick.into_iter().collect()]) {
+            for (inp, items) in ins.iter_mut().zip([sheet_sels(app, sketch.0, profiles.as_ref(), curves), pick.into_iter().collect()]) {
                 inp.items = items;
             }
             return Some((Kind::Surface(k), ins, extra));
@@ -615,23 +615,23 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             (
                 Surf::Sweep(opts),
                 vec![
-                    sheet_sels(app, *sketch, profiles.as_ref(), curves),
+                    sheet_sels(app, sketch.0, profiles.as_ref(), curves),
                     path.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect(),
                     direction.into_iter().collect(),
                 ],
             )
         }
-        FeatureKind::SurfaceLoft { sections } => {
-            (Surf::Loft, vec![sections.iter().flat_map(|sec| sheet_sels(app, sec.sketch, sec.profiles.as_ref(), &sec.curves)).collect()])
+        FeatureKind::SurfaceLoft { sections, .. } => {
+            (Surf::Loft, vec![sections.iter().flat_map(|sec| sheet_sels(app, sec.sketch.0, sec.profiles.as_ref(), &sec.curves)).collect()])
         }
         FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
-            let sels = sheet_sels(app, *sketch, profiles.as_ref(), curves);
+            let sels = sheet_sels(app, sketch.0, profiles.as_ref(), curves);
             let direction = match extent.direction {
                 Direction::Positive => 0,
                 Direction::Symmetric => 1,
                 Direction::Negative => 2,
             };
-            let k = Surf::Extrude { distance: extent.distance.clone(), direction };
+            let k = Surf::Extrude { distance: extent.distance.to_string(), direction };
             let mut ins = inputs(&k);
             if let Some(input) = ins.first_mut() {
                 input.items = sels;
@@ -644,14 +644,14 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let mut sels: Vec<Sel> = edges.iter().filter_map(edge).collect();
             if let Some(sk) = sketch {
                 let st = s.world_state();
-                if let Some(ss) = st.sketch(*sk) {
-                    sels.extend((0..ss.profiles.len()).map(|index| Sel::Profile { sketch: *sk, index }));
+                if let Some(ss) = st.sketch(sk.0) {
+                    sels.extend((0..ss.profiles.len()).map(|index| Sel::Profile { sketch: sk.0, index }));
                 }
             }
             let index = PATCH_CONTINUITY.iter().position(|(_, w)| *w == continuity.all.as_str()).unwrap_or(0);
             // What the dialog does not show is kept as it was: the crown, edges with a
             // continuity of their own, and points that are not on a face any more.
-            let through: Vec<Sel> = points.iter().filter_map(|p| crate::dialogs::face_sel(s, *p)).collect();
+            let through: Vec<Sel> = points.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect();
             let mut extra = Map::new();
             if *crown != 0.0 {
                 extra.insert("crown".into(), json!(crown));
@@ -660,7 +660,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 extra.insert("continuity".into(), serde_json::to_value(continuity).unwrap_or(Value::Null));
             }
             if through.len() != points.len() {
-                extra.insert("points".into(), json!(points.iter().map(|p| pt(*p)).collect::<Vec<_>>()));
+                extra.insert("points".into(), json!(points.iter().map(|p| pt(p.0)).collect::<Vec<_>>()));
             }
             let k = Surf::Patch { continuity: index };
             let mut ins = inputs(&k);
@@ -669,48 +669,49 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             }
             return Some((Kind::Surface(k), ins, extra));
         }
-        FeatureKind::SurfaceOffset { faces, distance, chain, .. } => {
-            (Surf::Offset { distance: distance.clone(), chain: *chain }, vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, *p)).collect()])
-        }
+        FeatureKind::SurfaceOffset { faces, distance, chain, .. } => (
+            Surf::Offset { distance: distance.to_string(), chain: *chain },
+            vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect()],
+        ),
         FeatureKind::SurfaceRuled { edges, distance, mode, angle, direction, flip, corners, face, .. } => {
             let k = Surf::Ruled {
-                distance: distance.clone(),
+                distance: distance.to_string(),
                 mode: match mode {
                     RuledMode::Normal => 0,
                     RuledMode::Tangent => 1,
                     RuledMode::Angle => 2,
                     RuledMode::Direction => 3,
                 },
-                angle: angle.clone().unwrap_or_else(|| "5 deg".into()),
+                angle: angle.as_deref().map(str::to_string).unwrap_or_else(|| "5 deg".into()),
                 flip: *flip,
                 round: *corners == RuledCorners::Round,
             };
             let mut ins = inputs(&k);
-            let fill = [edges.iter().filter_map(edge).collect(), face.and_then(|p| crate::dialogs::face_sel(s, p)).into_iter().collect()];
+            let fill = [edges.iter().filter_map(edge).collect(), face.and_then(|p| crate::dialogs::face_sel(s, p.0)).into_iter().collect()];
             for (inp, items) in ins.iter_mut().zip(fill) {
                 inp.items = items;
             }
             let mut extra = Map::new();
             if let Some(d) = direction {
-                extra.insert("direction".into(), pt(*d));
+                extra.insert("direction".into(), pt(d.0));
             }
             return Some((Kind::Surface(k), ins, extra));
         }
         FeatureKind::Unstitch { body, faces } | FeatureKind::ReverseNormal { body, faces } => {
             let sels: Vec<Sel> = if faces.is_empty() {
-                vec![Sel::Body { name: body.clone() }]
+                vec![Sel::Body { name: body.to_string() }]
             } else {
-                faces.iter().filter_map(|p| crate::dialogs::face_sel(s, *p)).collect()
+                faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect()
             };
             (if matches!(kind, FeatureKind::Unstitch { .. }) { Surf::Unstitch } else { Surf::ReverseNormal }, vec![sels])
         }
         FeatureKind::Stitch { bodies, tolerance } => (
-            Surf::Stitch { tolerance: if tolerance.trim() == "0" { String::new() } else { tolerance.clone() } },
-            vec![bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect()],
+            Surf::Stitch { tolerance: if tolerance.trim() == "0" { String::new() } else { tolerance.to_string() } },
+            vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()],
         ),
         FeatureKind::Thicken { bodies, thickness, symmetric, operation, .. } => (
-            Surf::Thicken { thickness: thickness.clone(), symmetric: *symmetric, operation: op_index(operation) },
-            vec![bodies.iter().map(|n| Sel::Body { name: n.clone() }).collect()],
+            Surf::Thicken { thickness: thickness.to_string(), symmetric: *symmetric, operation: op_index(operation) },
+            vec![bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect()],
         ),
         FeatureKind::SurfaceExtend { edges, distance, mode, up_to, neighbours, .. } => {
             // The dialog edits the edges and the distance; the rest is kept as it was.
@@ -726,14 +727,17 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                     extra.insert("up_to".into(), json!("bounds"));
                 }
                 Some(solidcraft_engine::doc::ExtendTo::Face(t)) => {
-                    extra.insert("up_to".into(), json!({"body": t.body, "point": pt(t.point)}));
+                    extra.insert("up_to".into(), json!({"body": t.body, "point": pt(t.point.0)}));
                 }
-                Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Origin { name } | PlaneRef::Construction { name })) => {
+                Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Origin { name })) => {
+                    extra.insert("up_to".into(), json!(name));
+                }
+                Some(solidcraft_engine::doc::ExtendTo::Plane(PlaneRef::Construction { name })) => {
                     extra.insert("up_to".into(), json!(name));
                 }
                 _ => {}
             }
-            let k = Surf::Extend { distance: distance.clone() };
+            let k = Surf::Extend { distance: distance.to_string() };
             let mut ins = inputs(&k);
             if let Some(inp) = ins.first_mut() {
                 inp.items = edges.iter().filter_map(edge).collect();
@@ -743,9 +747,9 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
         FeatureKind::SurfaceTrim { body, plane, tool, keep } => (
             Surf::Trim,
             vec![
-                vec![Sel::Body { name: body.clone() }],
+                vec![Sel::Body { name: body.to_string() }],
                 tool_sel(app, plane, tool.as_ref()).into_iter().collect(),
-                crate::dialogs::face_sel(s, *keep).into_iter().collect(),
+                crate::dialogs::face_sel(s, keep.0).into_iter().collect(),
             ],
         ),
         FeatureKind::SurfaceUntrim { face, holes, outer, in_place } => {
@@ -756,12 +760,12 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             };
             (
                 Surf::Untrim { holes: index, outer: *outer, in_place: *in_place },
-                vec![crate::dialogs::face_sel(s, face.point).into_iter().collect(), picked],
+                vec![crate::dialogs::face_sel(s, face.point.0).into_iter().collect(), picked],
             )
         }
         FeatureKind::SplitFace { faces, plane, tool, .. } => (
             Surf::SplitFace,
-            vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, *p)).collect(), tool_sel(app, plane, tool.as_ref()).into_iter().collect()],
+            vec![faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect(), tool_sel(app, plane, tool.as_ref()).into_iter().collect()],
         ),
         _ => return None,
     };

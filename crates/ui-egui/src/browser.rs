@@ -1531,12 +1531,17 @@ fn entry_row(
     acts: &mut Actions,
 ) {
     app.tree.order.push(e.row_key.clone());
+    let pattern_sketch =
+        (folder == "sketches").then(|| e.key.parse::<u64>().ok()).flatten().filter(|id| crate::sketch_pattern_tree::has_patterns(app, *id));
+    let pattern_key = format!("{}/patterns", e.row_key);
+    let patterns_open = is_open(app, &pattern_key, true);
     let badges: &[&str] = if e.locked { &["lock"] } else { &[] };
     let r = draw_row(
         ui,
         ui.id().with(("item", &e.row_key)),
         &Row {
             depth,
+            fold: pattern_sketch.map(|_| patterns_open),
             eye: Some(e.visible),
             icon: e.icon,
             label: &e.label,
@@ -1548,6 +1553,9 @@ fn entry_row(
             ..Default::default()
         },
     );
+    if r.fold {
+        toggle(app, &pattern_key, true);
+    }
     if folder == "bodies"
         && app.tree.reveal.as_deref() == Some(e.key.as_str())
         && let Some(rect) = r.rect
@@ -1586,6 +1594,9 @@ fn entry_row(
             let _ = app.run("select.set", json!({ "items": [s] }));
         }
         acts.menu = Some((p, t));
+    }
+    if let Some(sketch) = pattern_sketch.filter(|_| patterns_open) {
+        crate::sketch_pattern_tree::rows(app, ui, sketch, depth + 1, "browser", path.map(|path| (comp, path)));
     }
     let Some(resp) = &r.resp else { return };
     // Drag: the selected items of this folder when this one is selected, else just this one.

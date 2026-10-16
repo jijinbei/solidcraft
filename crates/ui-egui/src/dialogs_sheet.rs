@@ -673,20 +673,20 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     let mut extra = Map::new();
     let (k, items): (Sm, Vec<Sel>) = match kind {
         FeatureKind::SheetBase { sketch, profiles, rule, flip } => {
-            let ps = st.sketch(*sketch).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
+            let ps = st.sketch(sketch.0).map(|ss| profile_indices(ss, profiles)).unwrap_or_default();
             let mut f = new_flange(0);
             if let Sm::Flange { flip: fl, rule: r, .. } = &mut f {
                 *fl = *flip;
                 *r = rule_index(rule);
             }
-            (f, ps.into_iter().map(|index| Sel::Profile { sketch: *sketch, index }).collect())
+            (f, ps.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect())
         }
         FeatureKind::SheetContour { curves, distance, rule, flip, reverse, .. } => {
             let mut f = new_flange(2);
             if let Sm::Flange { flip: fl, rule: r, distance: d, reverse: rv, .. } = &mut f {
                 *fl = *flip;
                 *r = rule_index(rule);
-                *d = distance.clone();
+                *d = distance.to_string();
                 *rv = *reverse;
             }
             (f, curves.iter().map(|id| Sel::SketchCurve { id: id.clone() }).collect())
@@ -699,17 +699,21 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             // edge's selection carries).
             let (mut picked, mut own) = (Vec::new(), Vec::new());
             for e in edges {
-                let Some(sel) = edge_sel(s, e.point) else { continue };
+                let Some(sel) = edge_sel(s, e.point.0) else { continue };
                 if let (Sel::Edge { point, .. }, true) = (&sel, e.angle.is_some() || e.height.is_some()) {
-                    own.push((*point, e.angle.clone().unwrap_or_default(), e.height.clone().unwrap_or_default()));
+                    own.push((
+                        *point,
+                        e.angle.as_deref().map(str::to_string).unwrap_or_default(),
+                        e.height.as_deref().map(str::to_string).unwrap_or_default(),
+                    ));
                 }
                 picked.push(sel);
             }
             let f = Sm::Flange {
                 ty: 1,
-                height: height.clone(),
-                angle: angle.clone(),
-                radius: radius.clone().unwrap_or_default(),
+                height: height.to_string(),
+                angle: angle.to_string(),
+                radius: radius.as_deref().map(str::to_string).unwrap_or_default(),
                 position: POSITIONS.iter().position(|p| p == position).unwrap_or(0),
                 flip: *flip,
                 distance: "20 mm".into(),
@@ -720,7 +724,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .as_deref()
                     .and_then(|name| RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(name.trim())))
                     .map_or(0, |i| i + 1),
-                relief_size: corner_relief.clone().unwrap_or_default(),
+                relief_size: corner_relief.as_deref().map(str::to_string).unwrap_or_default(),
             };
             (f, picked)
         }
@@ -729,8 +733,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 extra.insert("body".into(), json!(b));
             }
             (
-                Sm::Hem { length: length.clone(), gap: gap.clone().unwrap_or_default(), flip: *flip },
-                edges.iter().filter_map(|p| edge_sel(s, *p)).collect(),
+                Sm::Hem { length: length.to_string(), gap: gap.as_deref().map(str::to_string).unwrap_or_default(), flip: *flip },
+                edges.iter().filter_map(|p| edge_sel(s, p.0)).collect(),
             )
         }
         FeatureKind::SheetFold { curve, a, b, angle, radius, position, flip, fixed, body, .. } => {
@@ -738,8 +742,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 extra.insert("body".into(), json!(bd));
             }
             let k = Sm::Fold {
-                angle: angle.clone(),
-                radius: radius.clone().unwrap_or_default(),
+                angle: angle.to_string(),
+                radius: radius.as_deref().map(str::to_string).unwrap_or_default(),
                 position: FOLD_POSITIONS.iter().position(|x| x == position || (*x == "mould" && position == "mold")).unwrap_or(0),
                 flip: *flip,
             };
@@ -752,22 +756,24 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 }
                 // A fold given by two points keeps them.
                 None => {
-                    extra.insert("points".into(), json!([pt(*a), pt(*b)]));
+                    extra.insert("points".into(), json!([pt(a.0), pt(b.0)]));
                 }
             }
             if let Some(i) = ins.get_mut(1) {
-                i.items = fixed.and_then(|f| face_sel(s, f)).into_iter().collect();
+                i.items = fixed.and_then(|f| face_sel(s, f.0)).into_iter().collect();
             }
             return Some((Kind::Sheet(k), ins, extra));
         }
-        FeatureKind::SheetUnfold { body, refold } => (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.clone() }).collect()),
+        FeatureKind::SheetUnfold { body, refold } => {
+            (Sm::Unfold { refold: *refold }, body.iter().map(|n| Sel::Body { name: n.to_string() }).collect())
+        }
         FeatureKind::SheetConvert { face, rule, bends, .. } => {
             let (_, mut ins) = start(app, "sheet.convert")?;
             if let Some(i) = ins.first_mut() {
-                i.items = face_sel(s, *face).into_iter().collect();
+                i.items = face_sel(s, face.0).into_iter().collect();
             }
             if let Some(i) = ins.get_mut(1) {
-                i.items = bends.iter().filter_map(|p| edge_sel(s, *p)).collect();
+                i.items = bends.iter().filter_map(|p| edge_sel(s, p.0)).collect();
             }
             return Some((Kind::Sheet(Sm::Convert { rule: rule_index(rule) }), ins, extra));
         }

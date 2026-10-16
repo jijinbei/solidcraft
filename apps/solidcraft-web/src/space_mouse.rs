@@ -9,10 +9,6 @@
 
 use solidcraft_ui_egui::space_mouse::{Axes, FULL_SCALE};
 
-/// Seconds after the cap last moved that wheel events are still taken for 3DxWare's: one can be
-/// queued just before the cap stops and only reach the next frame.
-const WHEEL_QUIET_S: f64 = 0.15;
-
 /// Logitech's vendor id, which older 3Dconnexion devices carry, and those devices' product ids
 /// (usb.ids). Logitech's own gamepads and wheels carry the same vendor id.
 const LOGITECH: u16 = 0x046d;
@@ -69,29 +65,6 @@ pub fn choose(found: impl IntoIterator<Item = (Source, Axes)>) -> Option<Axes> {
     found.into_iter().min_by_key(|(source, _)| *source).map(|(_, axes)| axes)
 }
 
-/// 3DxWare turns the cap's motion into mouse-wheel turns in a browser (its zoom emulation). The
-/// app reads the cap itself, so those are dropped: wheel events while the cap is moving and for
-/// [`WHEEL_QUIET_S`] after. 3DxWare sends them only well past the dead zone (from about a third
-/// of full deflection), never at rest, so a wheel turn with the cap at rest is the user's.
-#[derive(Debug, Default)]
-pub struct WheelGuard {
-    moved_at: Option<f64>,
-}
-
-impl WheelGuard {
-    /// Takes this frame's reading (`now` in seconds) and drops the frame's wheel events if they
-    /// are 3DxWare's.
-    pub fn filter(&mut self, moving: bool, now: f64, events: &mut Vec<egui::Event>) {
-        if moving {
-            self.moved_at = Some(now);
-        }
-        let recent = self.moved_at.is_some_and(|at| (0.0..=WHEEL_QUIET_S).contains(&(now - at)));
-        if recent {
-            events.retain(|e| !matches!(e, egui::Event::MouseWheel { .. } | egui::Event::Zoom(_)));
-        }
-    }
-}
-
 #[cfg(target_arch = "wasm32")]
 pub use browser::SpaceMouse;
 
@@ -105,7 +78,9 @@ mod browser {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::closure::Closure;
 
-    use super::{WheelGuard, axes, choose, source};
+    use solidcraft_ui_egui::space_mouse::WheelGuard;
+
+    use super::{axes, choose, source};
 
     /// How often the page looks for the cap starting to move while nothing else redraws.
     const WAKE_MS: i32 = 50;
@@ -199,19 +174,6 @@ mod browser {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn wheel(dy: f32) -> egui::Event {
-        egui::Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Point,
-            delta: egui::vec2(0.0, dy),
-            modifiers: egui::Modifiers::NONE,
-            phase: egui::TouchPhase::Move,
-        }
-    }
-
-    fn other() -> egui::Event {
-        egui::Event::PointerMoved(egui::pos2(1.0, 2.0))
-    }
 
     #[test]
     fn recognises_3d_mice_in_each_browsers_ids() {
@@ -319,33 +281,5 @@ mod tests {
         // Two devices: the first listed.
         assert_eq!(choose([(Source::Device, moving), (Source::Device, other)]), Some(moving));
         assert_eq!(choose([]), None);
-    }
-
-    #[test]
-    fn wheel_turns_are_dropped_while_the_cap_moves_and_kept_at_rest() {
-        let mut guard = WheelGuard::default();
-        // At rest, the wheel is the user's.
-        let mut events = vec![wheel(100.0), other()];
-        guard.filter(false, 10.0, &mut events);
-        assert_eq!(events.len(), 2);
-        // Moving: 3DxWare's wheel (and a pinch zoom) goes; everything else stays.
-        let mut events = vec![wheel(-100.0), other(), egui::Event::Zoom(1.1), wheel(100.0)];
-        guard.filter(true, 11.0, &mut events);
-        assert_eq!(events, vec![other()]);
-        // Just after the cap stops, a queued one still goes.
-        let mut events = vec![wheel(100.0)];
-        guard.filter(false, 11.0 + WHEEL_QUIET_S - 0.01, &mut events);
-        assert!(events.is_empty());
-        // Later, the wheel is the user's again.
-        let mut events = vec![wheel(100.0)];
-        guard.filter(false, 11.0 + WHEEL_QUIET_S + 0.01, &mut events);
-        assert_eq!(events.len(), 1);
-        // A clock that goes back never swallows the user's wheel.
-        let mut events = vec![wheel(100.0)];
-        guard.filter(false, 5.0, &mut events);
-        assert_eq!(events.len(), 1);
-        let mut events = vec![wheel(100.0)];
-        guard.filter(false, f64::NAN, &mut events);
-        assert_eq!(events.len(), 1);
     }
 }

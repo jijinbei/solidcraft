@@ -115,6 +115,40 @@ pub fn modes(session: &Value) -> Option<(String, Vec<(String, String)>)> {
     (!available.is_empty()).then_some((current, available))
 }
 
+/// One model an agent offers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+/// The agent's models in a `session/new` or `session/load` reply (`models`: `currentModelId` and
+/// `availableModels: [{modelId, name, description?}]`): the current one and each model. `None`
+/// when the agent reports none.
+pub fn models(session: &Value) -> Option<(String, Vec<ModelInfo>)> {
+    let m = session.get("models")?;
+    let current = m.get("currentModelId").and_then(Value::as_str).unwrap_or("").to_string();
+    let available: Vec<ModelInfo> = m
+        .get("availableModels")?
+        .as_array()?
+        .iter()
+        .take(200)
+        .filter_map(|x| {
+            let id = x.get("modelId").or_else(|| x.get("id"))?.as_str()?.to_string();
+            let name = x.get("name").and_then(Value::as_str).filter(|n| !n.is_empty()).unwrap_or(&id).to_string();
+            let description = x.get("description").and_then(Value::as_str).unwrap_or("").to_string();
+            Some(ModelInfo { id, name, description })
+        })
+        .collect();
+    (!available.is_empty()).then_some((current, available))
+}
+
+/// `session/set_model` parameters.
+pub fn set_model_params(session: &str, model: &str) -> Value {
+    json!({"sessionId": session, "modelId": model})
+}
+
 /// Whether the agent takes pictures in a message (`agentCapabilities.promptCapabilities.image`).
 pub fn takes_images(init: &Value) -> bool {
     init.pointer("/agentCapabilities/promptCapabilities/image").and_then(Value::as_bool).unwrap_or(false)
@@ -245,6 +279,8 @@ pub enum Incoming {
     AuthStatus(String),
     /// The agent switched to another of its modes.
     ModeChanged(String),
+    /// The agent switched to another model.
+    ModelChanged(String),
     /// A request we don't serve (file system, terminal, …): answer "method not found".
     Unsupported { rpc: Value, method: String },
     /// Anything else (mode and command lists, usage): nothing to show.
@@ -349,6 +385,10 @@ fn update(u: &Value) -> Incoming {
         },
         Some("current_mode_update") => match s("currentModeId").or_else(|| s("modeId")) {
             Some(m) => Incoming::ModeChanged(m),
+            None => Incoming::Ignored,
+        },
+        Some("current_model_update") => match s("currentModelId").or_else(|| s("modelId")) {
+            Some(m) => Incoming::ModelChanged(m),
             None => Incoming::Ignored,
         },
         Some("plan") => Incoming::Plan(
@@ -495,5 +535,24 @@ mod tests {
         let u = json!({"sessionUpdate": "tool_call", "toolCallId": "t", "content": [{"type": "content", "content": {"type": "text", "text": long}}]});
         let Incoming::Tool { output: Some(o), .. } = update(&u) else { panic!() };
         assert!(o.len() <= MAX_OUTPUT + 3 && o.ends_with('…'));
+    }
+
+    #[test]
+    fn the_models_of_a_session_reply_are_read_like_its_modes() {
+        let v = json!({"sessionId": "s", "models": {"currentModelId": "sonnet", "availableModels": [
+            {"modelId": "opus", "name": "Opus", "description": "Most capable"},
+            {"modelId": "sonnet", "name": "Sonnet"},
+            {"modelId": "haiku"},
+            {"name": "no id"}]}});
+        let (current, list) = models(&v).unwrap();
+        assert_eq!(current, "sonnet");
+        let names: Vec<_> = list.iter().map(|m| (m.id.as_str(), m.name.as_str(), m.description.as_str())).collect();
+        assert_eq!(names, [("opus", "Opus", "Most capable"), ("sonnet", "Sonnet", ""), ("haiku", "haiku", "")]);
+        // An agent without models, or with an empty list, reports none.
+        assert!(models(&json!({"sessionId": "s"})).is_none());
+        assert!(models(&json!({"models": {"currentModelId": "x", "availableModels": []}})).is_none());
+        let changed = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"current_model_update","currentModelId":"haiku"}}}"#;
+        assert_eq!(parse(changed), Some(Incoming::ModelChanged("haiku".into())));
+        assert_eq!(set_model_params("s", "opus"), json!({"sessionId": "s", "modelId": "opus"}));
     }
 }

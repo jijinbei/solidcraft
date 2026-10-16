@@ -6,6 +6,7 @@
 mod app_icons;
 mod assets;
 mod book;
+mod cam;
 mod features;
 mod i18n;
 mod layers;
@@ -61,6 +62,9 @@ commands:
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
+  cam-validate    validate analytic machining fixtures and write JSON/HTML reports
+  cam-oracle --dir DIR
+                  compare ignored local Fusion reference packages (missing evidence fails)
   ci              fmt --check, assets, licences --check, lists, layers, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
@@ -70,6 +74,8 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest: Vec<&str> = args.iter().skip(1).map(String::as_str).collect();
     let result = match args.first().map(String::as_str) {
+        Some("cam-validate") => cam::validate(&root()),
+        Some("cam-oracle") => cam::oracle(&root(), &rest),
         Some("layers") => cmd_layers(),
         Some("assets") => assets::run(&root()),
         Some("app-icons") => app_icons::run(&root()),
@@ -371,6 +377,7 @@ fn cmd_ci() -> Result<(), String> {
     let (wasm, n) = wasm_check()?;
     test::run(&[], &[], vec![(format!("wasm32-unknown-unknown check ({n} crates)"), wasm), test::doc_tests(&[], &[])])?;
     web_offline_test::run(&root(), None, false)?;
+    cam::validate(&root())?;
     eprintln!("ci: all gates passed");
     Ok(())
 }

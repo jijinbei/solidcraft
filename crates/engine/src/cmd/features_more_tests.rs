@@ -1151,3 +1151,32 @@ fn a_line_of_text_cut_through_or_joined_in_relief_is_one_boolean() {
     assert_eq!(pieces, 1);
     assert!(rel(relief - before, 2.0 * (before - one)) < 2e-3, "{} vs {}", relief - before, 2.0 * (before - one));
 }
+
+/// The same line of text cut again, deeper: the new walls lie on the letters' walls. The 2D route
+/// takes it as one exact boolean: a point a hair from a segment's end is that end, a sliver of a
+/// letter's curve shorter than the tolerance is dropped, and a piece of a letter so short that the
+/// engraved walls read it as an arc while the tool has the curve itself is one edge. Before, the
+/// sewing found a degenerate edge, then the faces did not close, and the cut went to the B-rep
+/// boolean's retries (90 s).
+#[test]
+fn a_line_of_text_cut_again_deeper_is_one_exact_boolean() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[105,26]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":40}));
+    let cut = |s: &mut Session, depth: f64| {
+        let before = volume(s);
+        run(s, "sketch.create", json!({"plane":"XY","offset":40}));
+        run(s, "sketch.text", json!({"text":"textvraiment tres long","at":[3,9],"height":6.5}));
+        run(s, "sketch.finish", json!({}));
+        let id = run(s, "solid.extrude", json!({"distance":-depth,"operation":"cut"}))["feature"].as_u64().unwrap();
+        let r = s.model.result(id).unwrap();
+        assert!(r.error.is_none() && r.boolean_diagnostics.events.is_empty(), "{depth}: {r:?}");
+        before - volume(s)
+    };
+    let first = cut(&mut s, 1.0);
+    // Cut again 2 mm deep: one more millimetre of the letters.
+    let again = cut(&mut s, 2.0);
+    assert!(rel(again, first) < 1e-3, "{first} {again}");
+}

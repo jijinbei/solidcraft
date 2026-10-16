@@ -10,6 +10,159 @@ use crate::dialogs::{Dialog, Kind, apply_commands};
 use crate::{Services, SolveApp};
 
 #[test]
+fn feature_mirror_and_patterns_reopen_as_feature_replays_even_for_body_creators() {
+    for (cmd, params) in [
+        ("solid.mirror", json!({"features":["Base"],"plane":"YZ"})),
+        (
+            "solid.pattern.rectangular",
+            json!({"features":["Base"],"dir1":[1,0,0],"count1":4,"spacing1":20,
+            "dir2":[0.6,0.8,0],"count2":2,"spacing2":20,"alignment":"center","alignment2":"center","reversed":true,"reversed2":true}),
+        ),
+        ("solid.pattern.circular", json!({"features":["Base"],"axis":"Z","count":6,"angle":90,"alignment":"center","reversed":true})),
+    ] {
+        let mut app = app_with(json!([
+            {"command":"solid.box","params":{"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"}}
+        ]));
+        app.session.execute(cmd, &params).unwrap();
+        let feature = app.session.doc.features.last().unwrap().clone();
+        // Exercise the save/reopen boundary as well as reopening the feature editor.
+        app.session = Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
+        let d = crate::dialogs::for_feature(&app, feature.id, None).unwrap();
+        assert_eq!(d.inputs[0].accept, crate::selection::FEATURES, "{cmd}");
+        assert_eq!(d.inputs[0].items, vec![Sel::Feature { id: app.session.doc.features[0].id }]);
+        let (edit, p) = apply_commands(&app, &d).unwrap().remove(0);
+        assert_eq!(edit, "timeline.redefine");
+        assert_eq!(p["params"]["features"], json!(["Base"]));
+        assert!(p["params"].get("bodies").is_none());
+        app.session.execute(&edit, &p).unwrap();
+        assert_eq!(app.session.doc.feature(feature.id).unwrap().kind, feature.kind, "{cmd}: accepting the reopened editor preserves its definition");
+    }
+}
+
+#[test]
+fn feature_pattern_controls_preview_without_committing_and_cancel_cleanly() {
+    for command in ["solid.pattern.rectangular", "solid.pattern.circular"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"})).unwrap();
+        let source = h.app.session.doc.features[0].id;
+        h.app.session.selection = vec![Sel::Feature { id: source }];
+        h.step(&json!({"start":command})).unwrap();
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[1].items = vec![Sel::Axis { name: if command.ends_with("rectangular") { "X".into() } else { "Z".into() } }];
+        if command.ends_with("rectangular") {
+            d.inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
+        }
+        let saved = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        h.frames(3);
+        for handle in ["dialog:Alignment:Center", "dialog:Alignment:Flip direction"] {
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+        }
+        if command.ends_with("rectangular") {
+            for handle in ["dialog:Alignment 2:Center", "dialog:Alignment 2:Flip direction"] {
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+            }
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        let (_, p) = apply_commands(&h.app, d).unwrap().remove(0);
+        assert_eq!(p["alignment"], json!("center"));
+        assert_eq!(p["reversed"], json!(true));
+        if command.ends_with("rectangular") {
+            assert_eq!(p["alignment2"], json!("center"));
+            assert_eq!(p["reversed2"], json!(true));
+        }
+        assert_eq!(h.app.session.doc.to_json(), saved);
+        assert_eq!(h.app.session.undo.len(), undo);
+        wait_feature_preview(&mut h);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(3);
+        assert!(h.app.dialog.is_none());
+        assert!(!h.app.preview.active);
+        assert_eq!(h.app.session.doc.to_json(), saved);
+    }
+}
+
+fn wait_feature_preview(h: &mut crate::scenario::Harness) {
+    for _ in 0..300 {
+        h.frames(2);
+        if h.app.preview.active && !h.app.preview.busy {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(h.app.preview.active && !h.app.preview.busy, "preview failed: {:?}", h.app.preview.error);
+    assert!(h.app.preview.error.is_none());
+}
+
+#[test]
+fn saved_feature_pattern_vectors_are_visible_clearable_and_replaceable() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"name":"Base"})).unwrap();
+    h.app
+        .run(
+            "solid.pattern.rectangular",
+            json!({"features":["Base"],"dir1":[1,1,0],"count1":2,"spacing1":30,
+        "dir2":[0.6,0.8,0],"count2":2,"spacing2":50}),
+        )
+        .unwrap();
+    let id = h.app.session.doc.features.last().unwrap().id;
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":id}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:clear:Direction 2"}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let (_, p) = apply_commands(&h.app, d).unwrap().remove(0);
+    assert!(p["params"].get("dir2").is_none(), "clearing the saved second vector makes a single row: {d:?} -> {p}");
+    assert_eq!(p["params"]["dir1"], json!([1.0, 1.0, 0.0]));
+    h.step(&json!({"click":{"handle":"dialog:clear:Direction"}})).unwrap();
+    assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+    let d = h.app.dialog.as_mut().unwrap();
+    d.pick(&h.app.session, Sel::Axis { name: "X".into() });
+    let (_, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert_eq!(p["params"]["dir1"], json!([1.0, 0.0, 0.0]));
+}
+
+#[test]
+fn feature_mirror_picks_clear_preview_and_replay_the_source_cut() {
+    let mut h = crate::scenario::Harness::new();
+    for (cmd, p) in [
+        ("solid.box", json!({"length":100,"width":50,"height":5,"corner":[0,0,0]})),
+        ("solid.hole", json!({"position":[30,25,5],"diameter":4,"name":"Hole"})),
+        ("construct.plane.offset", json!({"base":"YZ","offset":50,"name":"Mid"})),
+    ] {
+        h.app.run(cmd, p).unwrap();
+    }
+    let source = Sel::Feature { id: h.app.session.doc.find_feature("Hole").unwrap().id };
+    h.app.session.selection = vec![source.clone()];
+    h.step(&json!({"start":"solid.mirror"})).unwrap();
+    let saved = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = 0;
+    d.pick(&h.app.session, source.clone());
+    assert!(d.inputs[0].items.is_empty());
+    d.pick(&h.app.session, source);
+    d.active = 1;
+    d.pick(&h.app.session, Sel::Plane { name: "Mid".into() });
+    wait_feature_preview(&mut h);
+    assert_eq!(h.app.session.doc.to_json(), saved);
+    assert_eq!(h.app.session.undo.len(), undo);
+    h.step(&json!({"click":{"handle":"dialog:clear:Mirror Plane"}})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[1].items.is_empty());
+    assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+    let d = h.app.dialog.as_mut().unwrap();
+    d.pick(&h.app.session, Sel::Plane { name: "Mid".into() });
+    wait_feature_preview(&mut h);
+    h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
+    h.step(&json!({"until":{"dialog":null,"features":4}})).unwrap();
+    let state = h.app.session.world_state();
+    assert_eq!(state.bodies.len(), 1, "a mirrored hole cuts the plate instead of copying it");
+    assert!(!state.bodies[0].body.contains(Vec3::new(70.0, 25.0, 2.5)));
+    let mirror = h.app.session.doc.features.last().unwrap().id;
+    let reopened = crate::dialogs::for_feature(&h.app, mirror, None).unwrap();
+    assert_eq!(reopened.inputs[0].accept, crate::selection::FEATURES);
+    assert_eq!(reopened.inputs[1].items, vec![Sel::Plane { name: "Mid".into() }]);
+}
+
+#[test]
 fn a_face_extrude_keeps_the_picked_body_when_faces_coincide() {
     let mut app = app_with(json!([
         {"command":"solid.box","params":{"length":40,"width":30,"height":20,"body_name":"Other"}},
