@@ -259,7 +259,9 @@ jobs:
           if [ "$SHARD" = 2 ]; then
             regressions+=" | (package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives))"
           fi
-          cargo nextest run --archive-file tests.tar.zst --workspace-remap . --extract-to . --extract-overwrite \
+          # The ordinary run extracted this archive; reuse its metadata for the extra tests.
+          cargo nextest run --cargo-metadata target/nextest/cargo-metadata.json \
+            --binaries-metadata target/nextest/binaries-metadata.json --workspace-remap . --target-dir-remap target \
             --profile ci --ignore-default-filter -E "$regressions"
       - name: Upload test timings
         if: always()

@@ -98,7 +98,9 @@ Kernel-related PRs run one robustness sample per shard after the ordinary tests.
 runs the tangent-primitive regression once. Keeping these additions separate preserves the
 ordinary tests' shard assignments. Before the extra invocation, each shard saves its ordinary
 tests' JUnit report as `junit-main.xml`; the timing artifact includes both reports, including
-failures. PR builds and tests otherwise follow the affected packages selected by
+failures. The supplemental invocation reads the current archive's extracted Cargo and binary
+metadata, so the same executables run without unpacking the archive again.
+PR builds and tests otherwise follow the affected packages selected by
 `scripts/ci/affected.py`; unowned paths and shared configuration select the whole workspace.
 
 The **action matrix** (`apps/solidcraft-cli/tests/action_matrix.rs`) tries every ordinary action
