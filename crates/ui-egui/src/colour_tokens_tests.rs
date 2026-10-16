@@ -177,7 +177,6 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("sketch_text.rs", 1, "white text on the selection chip"),
     ("titlebar.rs", 4, "the window close button's red hover (the system's convention), white hovers and ink"),
     ("toolbar.rs", 3, "white hover overlays and the version text"),
-    ("update.rs", 1, "text laid out only to measure its width, never drawn"),
 ];
 
 const COLOUR_LITERALS: &[&str] = &[

@@ -267,3 +267,48 @@ fn lip_swept_flush_round_a_corner_joins() {
     let volume = b.body.tessellate(1e-5).unwrap().measure().volume;
     assert!((volume - block - lip).abs() < 0.02, "{volume} expected {}", block + lip);
 }
+
+/// #1275: an Extrude Cut of a whole face of a rounded-rectangle block with a bottom chamfer. The
+/// tool's corner cylinders lay on the block's; they are grown off them now, as straight edges
+/// were, and the cut takes 5 mm off the top.
+#[test]
+fn cut_of_a_whole_face_beside_round_corners_after_a_chamfer() {
+    let s = replay(include_str!("../../../examples/regressions/cut_whole_face_after_bottom_chamfer.json"));
+    let bodies = &s.model.state().bodies;
+    assert_eq!(bodies.len(), 1);
+    let b = &bodies[0];
+    assert!(b.body.validity().is_empty(), "{:?}", b.body.validity());
+    let pi = std::f64::consts::PI;
+    let block = (40.0 * 40.0 - (4.0 - pi) * 8.0 * 8.0) * 15.0;
+    // The chamfer's 2 × 2 triangle swept along the loop (Pappus: its centroid is 2/3 mm in).
+    let chamfer = 2.0 * (4.0 * 24.0 + 2.0 * pi * (8.0 - 2.0 / 3.0));
+    let mesh = b.body.tessellate(1e-4).unwrap();
+    let volume = mesh.measure().volume;
+    assert!((volume - (block - chamfer)).abs() < 0.05, "{volume} expected {}", block - chamfer);
+    let top = mesh.bounds().max.z;
+    assert!((top - 15.0).abs() < 1e-6, "top at {top}");
+}
+
+/// The display tessellation of loft bodies joined into a bike frame plans at every display
+/// quality and every refinement step. The edge nodes on an intersection of two lofts once
+/// stepped back along the curve (the edge's fit rang where truck's parameter changes speed, and
+/// took a leader point off the curve past a vertex), so a face's boundary crossed itself and
+/// the body fell back to the reference mesher, which drew a sheet across the down tube.
+#[test]
+fn joined_loft_frames_plan_their_display_at_every_quality() {
+    use solidcraft_doc::display_quality::{DisplayQuality, MAX_REFINE};
+    for (script, name) in [
+        (include_str!("../../../examples/regressions/loft_join_bracket_hull_triangle.json"), "DT2"),
+        (include_str!("../../../examples/regressions/front_triangle_hull_triangle.json"), "FrontTriangle"),
+    ] {
+        let s = replay(script);
+        let state = s.model.state();
+        let body = &state.body(name).unwrap().body;
+        for q in DisplayQuality::ALL {
+            for k in 0..=MAX_REFINE {
+                let plan = body.display_plan_angular(q.refined_chord(body.size(), k), q.refined_angle(k));
+                assert!(plan.is_ok(), "{name} at {} + {k}: {:?}", q.id(), plan.err());
+            }
+        }
+    }
+}

@@ -89,8 +89,9 @@ its `crates/geom` dependency, vendored truck crates, and workspace dependency/to
   `tests::robustness_goldens` (kernel-related pull requests run its `sample_*` part),
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
-  `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`
-- `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives` (on kernel-related PRs)
+  `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests
+- `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives`, and the `boolean_props` property tests
+  (these run only in the nightly "Property tests" job: their inputs are random, so main skips them too)
 - `solidcraft-ui-egui` scenarios: `acceptance_sensor_enclosure`
 
 Kernel-related PRs add those regressions to the default test selection before partitioning.

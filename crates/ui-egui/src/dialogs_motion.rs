@@ -326,6 +326,34 @@ fn study_pose(app: &SolveApp, params: &Value, step: u32) -> Result<BTreeMap<u64,
     Ok(moved(&app.session, &sc))
 }
 
+/// Save the study being edited as an animated GIF, seen from the viewport's camera. Drawn on a
+/// scratch copy, so the dialog's keys need not be saved first and the design is not changed.
+fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
+    // The view as the viewport shows it: its camera, and its grid and axes on or off.
+    let (camera, guides) = (app.cam, crate::control::window_guides(app));
+    let file = format!("{}.gif", Some(name.trim()).filter(|n| !n.is_empty()).unwrap_or("Motion Study"));
+    app.pick_save(&file, &["gif"], move |app, path| {
+        let Some(mut path) = path else { return };
+        // A name typed without the extension is still a GIF (not a folder of frames).
+        if !path.to_ascii_lowercase().ends_with(".gif") {
+            path.push_str(".gif");
+        }
+        let mut sc = app.session.scratch();
+        // Cut as the viewport is (a copy leaves the section out).
+        sc.section = app.session.section;
+        let made = sc.execute("motion.study", &params).and_then(|r| {
+            sc.execute(
+                "motion.export_animation",
+                &json!({"study": r["study"], "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes}),
+            )
+        });
+        match made {
+            Ok(_) => app.set_status(crate::i18n::format("ui.saved_to", &[("path", &path)]), false),
+            Err(e) => app.set_status(e.to_string(), true),
+        }
+    });
+}
+
 /// The explosion at `scale`, computed on a scratch copy.
 fn explode_pose(app: &SolveApp, scale: f64) -> Result<BTreeMap<u64, Mat>, String> {
     let mut sc = app.session.scratch();
@@ -532,15 +560,28 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 tracks.remove(i);
             }
             row_label(ui, "");
-            if ui.button(crate::i18n::tr_label("Add Key")).on_hover_text(crate::i18n::tr_label("Key a joint's value at this step")).clicked()
-                && let Some((ji, _, kind)) = moving.first()
-            {
-                let unit = if kind.is_angle(0) { "deg" } else { "mm" };
-                tracks.push(Track { joint: *ji, index: 0, points: vec![(now, format!("0 {unit}"))] });
-            }
+            let mut export = false;
+            ui.horizontal(|ui| {
+                if ui.button(crate::i18n::tr_label("Add Key")).on_hover_text(crate::i18n::tr_label("Key a joint's value at this step")).clicked()
+                    && let Some((ji, _, kind)) = moving.first()
+                {
+                    let unit = if kind.is_angle(0) { "deg" } else { "mm" };
+                    tracks.push(Track { joint: *ji, index: 0, points: vec![(now, format!("0 {unit}"))] });
+                }
+                export = ui
+                    .button(crate::i18n::tr_label("Export Animation…"))
+                    .on_hover_text(crate::i18n::tr_label("Save the study as an animated GIF, seen as the viewport shows it"))
+                    .clicked();
+            });
             ui.end_row();
             // Show the pose at this step (again when the step or the keys change).
             let params = study_params(&app.session, name, study.as_deref(), steps, tracks);
+            if export {
+                match &params {
+                    Ok(p) => export_animation(app, p.clone(), name),
+                    Err(e) => *error = Some(e.clone()),
+                }
+            }
             let key = {
                 use std::hash::{Hash, Hasher};
                 let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1274,6 +1315,48 @@ mod tests {
             );
             assert!(bounds.iter().all(|b| b.y1 - b.y0 <= 24.0), "{label} wrapped: {bounds:?}");
         }
+    }
+
+    /// Export Animation saves the study the dialog shows (its keys need not be saved) as a GIF,
+    /// also when the name is typed without `.gif`, and the design keeps no study.
+    #[test]
+    fn export_animation_saves_the_dialogs_study_as_a_gif() {
+        // Drawn as the CLI draws (the headless device), as scenario shots are.
+        #[cfg(not(target_arch = "wasm32"))]
+        if solidcraft_engine::capture::installed().is_none() {
+            solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
+                let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                Ok(solidcraft_engine::capture::Picture { rgba, renderer })
+            }));
+        }
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 30)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        let a = json!({"occurrence": "A:1", "face": [10, 10, 10]});
+        h.app.run("joint.create", json!({"type": "revolute", "a": a, "b": {"occurrence": "B:1", "face": [40, 10, 0]}})).unwrap();
+        h.app.start("motion.study");
+        h.frames(3);
+        let Some(Kind::Motion(Mo::MotionStudy { name, steps, tracks, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else {
+            panic!("no Motion Study dialog");
+        };
+        *name = "Swing".into();
+        *steps = "4".into();
+        *tracks = vec![Track { joint: 0, index: 0, points: vec![(0, "0 deg".into()), (4, "90 deg".into())] }];
+        let dir = h.dir.clone();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert_eq!((name, extensions), ("Swing.gif", &["gif"][..]));
+            Box::pin(std::future::ready(Some(dir.join("swing").to_string_lossy().into_owned())))
+        }));
+        h.frames(2);
+        h.step(&json!({"widget": "Export Animation…"})).unwrap();
+        h.frames(3);
+        let gif = std::fs::read(h.dir.join("swing.gif")).unwrap();
+        assert!(gif.starts_with(b"GIF89a"), "{:?}", h.app.status);
+        assert!(h.app.status.as_ref().is_some_and(|s| !s.2), "{:?}", h.app.status);
+        assert!(h.app.session.doc.assembly.studies.is_empty(), "exporting saves no study");
     }
 
     #[test]

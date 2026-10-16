@@ -533,7 +533,9 @@ pub(crate) fn paint_preview_curve(
     mode: u8,
 ) {
     for curve in &mut sketch.curves {
-        curve.centerline = mode == 2 && matches!(curve.kind, solidcraft_engine::sketch::CurveKind::Line { .. });
+        let line = matches!(curve.kind, solidcraft_engine::sketch::CurveKind::Line { .. });
+        curve.centerline = mode == 2 && line;
+        curve.infinite = mode == 3 && line;
         curve.construction = mode != 0 && !curve.centerline;
     }
     paint_curve(&sketch, 0, plane, painter, proj, stroke, &mut solidcraft_engine::render::SamplingBudget::new(4096, 65_536));
@@ -585,6 +587,14 @@ pub(crate) fn preview_curve(t: &Tool, hover: Vec2, sweep: Option<f64>, rho: Opti
         }
         ("sketch.circle.two_point", [a]) => {
             sk.add_circle((*a + hover) * 0.5, a.dist(hover) * 0.5, None, None).ok()?;
+        }
+        // The first click is the middle: the line runs from the cursor's mirror image through
+        // it to the cursor (#1358), not from the middle to the cursor.
+        ("sketch.line.midpoint", [m]) => {
+            if m.dist(hover) <= 1e-9 {
+                return None;
+            }
+            sk.add_line(*m * 2.0 - hover, hover, None, None, None).ok()?;
         }
         ("sketch.circle.three_point" | "sketch.arc.three_point", [a, b]) => {
             let ab = *b - *a;

@@ -309,7 +309,6 @@ fn every_flat_face_of_a_block_and_a_flush_step_takes_a_sketch() {
 /// #681 as reported: one sketch of a 2 x 2 grid, three cells extruded up (an elbow) and three
 /// joined down (the inverse elbow).
 #[test]
-#[ignore = "the join of the elbow down fails until #679 is fixed"]
 fn every_flat_face_of_an_elbow_up_and_an_elbow_down_takes_a_sketch() {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Grid"}));
