@@ -180,31 +180,23 @@ jobs:
       - name: Run tests
         env:
           EVENT_NAME: ${{ github.event_name }}
+          KERNEL_CHANGED: ${{ needs.changes.outputs.kernel }}
           SHARD: ${{ matrix.shard }}
         run: |
-          # Pull requests skip the heavy tests (default-filter in .config/nextest.toml).
-          all=()
-          if [ "$EVENT_NAME" != pull_request ]; then all=(--ignore-default-filter); fi
+          # Select once before partitioning, so every test runs once and shares one JUnit report.
+          selection=(--ignore-default-filter)
+          if [ "$EVENT_NAME" = pull_request ]; then
+            selection=()
+            if [ "$KERNEL_CHANGED" = true ]; then
+              selection=(--ignore-default-filter -E 'default()
+                | (package(solidcraft-engine) & test(/^tests::robustness_goldens::sample_[0-3]$/))
+                | (package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives))')
+            fi
+          fi
           # Extract into ./target: tests that run a built binary (env!("CARGO_BIN_EXE_*")) have
           # the build job's path, which is the same checkout path here.
           cargo nextest run --archive-file tests.tar.zst --workspace-remap . --extract-to . --extract-overwrite \
-            --profile ci --partition "slice:$SHARD/4" "${all[@]}"
-      - name: Robustness goldens sample (pull requests that touch the kernel)
-        # Every 8th seed of tests/robustness/goldens.json, a quarter per shard; pushes to main and
-        # the nightly run every seed in the step above.
-        if: github.event_name == 'pull_request' && needs.changes.outputs.kernel == 'true'
-        env:
-          SHARD: ${{ matrix.shard }}
-        run: |
-          cargo nextest run --archive-file tests.tar.zst --workspace-remap . --extract-to . --extract-overwrite \
-            --profile ci --ignore-default-filter \
-            -E "package(solidcraft-engine) & test(=tests::robustness_goldens::sample_$((SHARD - 1)))"
-      - name: Tangent primitive boolean regression (pull requests that touch the kernel)
-        if: github.event_name == 'pull_request' && needs.changes.outputs.kernel == 'true'
-        run: |
-          cargo nextest run --archive-file tests.tar.zst --workspace-remap . --extract-to . --extract-overwrite \
-            --profile ci --ignore-default-filter \
-            -E 'package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives)'
+            --profile ci --partition "slice:$SHARD/4" "${selection[@]}"
       - name: Upload test timings
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

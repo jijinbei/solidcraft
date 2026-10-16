@@ -93,6 +93,10 @@ its `crates/geom` dependency, vendored truck crates, and workspace dependency/to
 - `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives` (on kernel-related PRs)
 - `solidcraft-ui-egui` scenarios: `acceptance_sensor_enclosure`
 
+Kernel-related PRs add those regressions to the default test selection before partitioning.
+Each selected test runs once across the four shards, and each shard writes one JUnit report
+containing both its ordinary tests and any kernel regressions.
+
 The **action matrix** (`apps/solidcraft-cli/tests/action_matrix.rs`) tries every ordinary action
 (sketch, offset plane, press pull, hole, draft, shell, fillet, chamfer, construction geometry, move,
 mirror, pattern) on every face, edge, vertex and body of a corpus of designs and compares with a
