@@ -697,8 +697,13 @@ fn poll_install(app: &mut SolveApp) {
     app.updater.job = None;
     match &result {
         Ok(install::Outcome::Installer(program, args)) => {
-            // The installer replaces this program: start it once SolidCraft has closed.
-            app.updater.launch = Some((program.clone(), args.clone()));
+            // The installer replaces this program: start it once SolidCraft has closed. On
+            // Windows the installer is followed by the new version (see install::relaunch_after).
+            app.updater.launch = Some(match std::env::current_exe() {
+                #[cfg(windows)]
+                Ok(exe) => install::relaunch_after(program, args, &exe),
+                _ => (program.clone(), args.clone()),
+            });
             crate::documents::request_quit(app);
         }
         Ok(install::Outcome::Opened(dmg)) => {

@@ -1445,3 +1445,6 @@ fn hostile_trace_params_are_refused() {
 
 #[path = "joints_coupling_tests.rs"]
 mod coupling;
+
+#[path = "joints_cam_tests.rs"]
+mod cam;

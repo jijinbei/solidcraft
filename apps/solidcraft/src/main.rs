@@ -94,10 +94,20 @@ impl eframe::App for App {
         solidcraft_ui_egui::recovery_ui::close(&mut self.solve);
         solidcraft_engine::crash::end_session();
         // An update asked to restart into the new version or to run its installer.
-        if let Some((program, args)) = solidcraft_ui_egui::update::take_launch(&mut self.solve)
-            && let Err(e) = std::process::Command::new(&program).args(&args).spawn()
-        {
-            log::error!("update: starting {}: {e}", program.display());
+        if let Some((program, args)) = solidcraft_ui_egui::update::take_launch(&mut self.solve) {
+            let mut command = std::process::Command::new(&program);
+            command.args(&args);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                // Not tied to this process: its own process group, and no console (the PowerShell
+                // that waits for an installer is hidden; the app itself is detached).
+                let hidden_shell = program.file_stem().is_some_and(|n| n.eq_ignore_ascii_case("powershell"));
+                command.creation_flags(0x0000_0200 | if hidden_shell { 0x0800_0000 } else { 0x0000_0008 });
+            }
+            if let Err(e) = command.spawn() {
+                log::error!("update: starting {}: {e}", program.display());
+            }
         }
     }
 }

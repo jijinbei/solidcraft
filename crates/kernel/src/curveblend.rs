@@ -1723,10 +1723,14 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                 continue;
             }
             let h = length(k) / (samples - 1) as f64;
-            let spaced = |nb: usize, from_end: bool| -> Result<Option<Vec<Section>>> {
+            // A neighbour shorter than two of the strip's steps lends none: its own sections are
+            // spaced far closer (a small round beside a long line), and borrowing them made the
+            // strip overshoot and fold back on itself past the joint, which its faces' meshes
+            // then folded with (#1667). The strip ends on the joint's section on its own.
+            let spaced = |nb: usize, from_end: bool| -> Result<Vec<Section>> {
                 let l = length(nb);
                 if !(l > 2.0 * h && h > 0.0) {
-                    return Ok(None);
+                    return Ok(Vec::new());
                 }
                 let mut out = Vec::with_capacity(2);
                 for j in [1.0, 2.0] {
@@ -1735,7 +1739,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                 if from_end {
                     out.reverse();
                 }
-                Ok(Some(out))
+                Ok(out)
             };
             let (prev, next) = ((k + n - 1) % n, (k + 1) % n);
             let list = esec.get(k).ok_or_else(|| KernelError::Failed("section".into()))?;
@@ -1748,23 +1752,22 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
                 _ => false,
             };
             let before = match (closed || k > 0) && rolls(prev) {
-                true => spaced(prev, true)?
-                    .map(|b| if smooth([list.first(), list.get(1), list.get(2)], [list.first(), b.get(1), b.first()]) { b } else { Vec::new() }),
-                false => Some(Vec::new()),
+                true => {
+                    let b = spaced(prev, true)?;
+                    if smooth([list.first(), list.get(1), list.get(2)], [list.first(), b.get(1), b.first()]) { b } else { Vec::new() }
+                }
+                false => Vec::new(),
             };
             let after = match (closed || k + 1 < n) && rolls(next) {
-                true => spaced(next, false)?.map(|a| {
+                true => {
+                    let a = spaced(next, false)?;
                     let m = list.len();
                     let tail = [list.last(), m.checked_sub(2).and_then(|i| list.get(i)), m.checked_sub(3).and_then(|i| list.get(i))];
                     if smooth(tail, [list.last(), a.first(), a.get(1)]) { a } else { Vec::new() }
-                }),
-                false => Some(Vec::new()),
+                }
+                false => Vec::new(),
             };
-            let fit = match (before, after) {
-                (Some(b), Some(a)) => crate::guard("fit curve blend", || fit_strip(list, &b, &a, round))?,
-                _ => crate::guard("fit curve blend", || fit_sections(&esec, k, closed, round))?,
-            };
-            let mut fit = fit;
+            let mut fit = crate::guard("fit curve blend", || fit_strip(list, &before, &after, round))?;
             fit.span = guides.get(k).and_then(Option::as_ref).map(|g| g.span).unwrap_or((0.0, 1.0));
             fits.push(Some(fit));
         }

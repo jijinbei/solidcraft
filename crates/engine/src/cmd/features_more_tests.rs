@@ -92,6 +92,23 @@ fn emboss_and_deboss_on_a_face() {
     assert!(s.execute("solid.emboss", &json!({"sketch": "Logo", "depth": 1, "mode": "sideways"})).is_err());
 }
 
+#[test]
+fn emboss_face_off_the_part_says_how_far() {
+    // #392: a point beside the face was refused with "`face` must identify exactly one target
+    // body surface", which didn't say the point was off the face.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "A"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 10]}, "name": "Logo"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("solid.emboss", &json!({"sketch": "Logo", "depth": 1, "face": [20, 15, 11.25]})).unwrap_err().to_string();
+    assert!(e.contains("[20, 15, 11.25] lies on no face: the nearest, on `A`, is 1.250 mm away"), "{e}");
+    run(&mut s, "solid.box", json!({"length": 10, "width": 30, "height": 10, "corner": [40, 0, 0], "operation": "new_body", "body_name": "B"}));
+    let e = s.execute("solid.emboss", &json!({"sketch": "Logo", "depth": 1, "face": [40, 15, 5]})).unwrap_err().to_string();
+    assert!(e.contains("lies on faces of 2 bodies (A, B): name one in `targets`"), "{e}");
+    run(&mut s, "solid.emboss", json!({"sketch": "Logo", "depth": 1, "face": [20, 15, 10]}));
+}
+
 fn cylinder_badge() -> Session {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name":"badge_depth","expression":"1 mm"}));

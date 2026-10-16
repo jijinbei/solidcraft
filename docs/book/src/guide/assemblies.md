@@ -55,6 +55,33 @@ driven one. A joint follows one link at most, and a coupling that would drive it
 refused. `joint.list` lists each coupling's definition under `links` with an `error` when it can't
 be worked out (the picked face is gone); the link then keeps its last ratio.
 
+**Cam** (`joint.cam {a, b, profile}`, on the **ASSEMBLE** panel) makes a follower ride a cam. The
+cam turns on a revolute joint (a); the follower is a slider (b, a translating follower such as a
+valve tappet) or a revolute joint (b, an oscillating follower such as a rocker arm). The profile
+is the cam's outline in a plane square to its axis: a closed profile of a sketch in the cam's
+component, or the cam's edges picked on its body (one click on an edge takes the closed loop it is
+on in that plane). The follower is:
+
+- a **Knife edge**: a point on the cam;
+- a **Roller** of a radius, typed or taken from the roller's round face (picking that face also
+  says where the roller is);
+- a **Flat face** square to a slider's line, such as a bucket tappet.
+
+A translating follower's line runs along its slider's axis, through its **Tip** when one is picked
+(its knife's point or its roller's centre), so a follower offset from the cam's axis rides the
+right flank. An oscillating follower needs its tip, or its roller's face, to know its arm. The
+follower rides the cam from the side it is on (**Other side** takes the other one). The follower's
+travel over a turn of the cam is worked out from the profile and kept with the link, one value a
+degree with a smooth curve between them that never overshoots its samples. It is worked out again
+whenever the design changes: change the cam's sketch, a parameter or the roller, and the follower
+follows. Like the gears, the new link leaves the follower where it is (model it touching the cam),
+and the cam is a motion link: it drives in **Drive Joints**, plays in motion studies, works in
+closed loops (a tappet can be the piston of a slider-crank) and stops at contact sets. The profile
+may also be on the grounded part, with the follower's guide on a turret that the cam joint turns.
+`joint.list` gives a cam's link `lift` (the follower's lowest and highest values and its rise)
+instead of a ratio. A profile that is not closed, a line or an arm that misses the cam somewhere,
+a follower that would jump, and axes that are not square or parallel are refused.
+
 A joint moves one component against another, so its two picks must be on different components.
 A STEP file with several parts often comes in as bodies of one component, and picks on two of
 those bodies make no joint. The Joint and As-built Joint dialogs say so under the picks and offer

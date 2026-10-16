@@ -260,6 +260,7 @@ pub enum Kind {
     SaveMesh(crate::dialogs_save_mesh::SaveMesh),
     ViewDxf {
         dashed: bool,
+        tolerance: f64,
     },
     /// Plastic features (`dialogs_plastic`).
     Plastic(crate::dialogs_plastic::Pl),
@@ -2948,7 +2949,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     Kind::Surface(k) => enter |= crate::dialogs_surface::rows(ui, k),
                     Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k),
                     Kind::SaveMesh(k) => enter |= crate::dialogs_save_mesh::rows(app, ui, k),
-                    Kind::ViewDxf { dashed } => crate::dialogs_view_dxf::rows(app, ui, dashed),
+                    Kind::ViewDxf { dashed, tolerance } => crate::dialogs_view_dxf::rows(app, ui, dashed, tolerance),
                     Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
                     Kind::Appearance(k) => enter |= crate::dialogs_appearance::rows(app, ui, k, &mut d.inputs),
                     Kind::Motion(k) => enter |= crate::dialogs_motion::rows(app, ui, k, &mut d.inputs),
@@ -3477,8 +3478,8 @@ fn sels(d: &Dialog, i: usize) -> &[Sel] {
 }
 
 pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
-    if let Kind::ViewDxf { dashed } = &d.kind {
-        return crate::dialogs_view_dxf::run(app, *dashed);
+    if let Kind::ViewDxf { dashed, tolerance } = &d.kind {
+        return crate::dialogs_view_dxf::run(app, *dashed, *tolerance);
     }
     // Saving asks for a file name first; `Err("")` is the user backing out of that.
     if let Kind::SaveMesh(k) = &d.kind {

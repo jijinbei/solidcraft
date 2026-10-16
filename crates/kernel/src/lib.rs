@@ -85,7 +85,7 @@ mod outline;
 #[cfg(test)]
 mod outline_tests;
 mod par;
-pub use par::{for_each_on_threads, map_on_threads};
+pub use par::{for_each_on_threads, map_on_threads, map_with_local_pools};
 #[cfg(test)]
 mod pinch_tests;
 mod planar_faces;
