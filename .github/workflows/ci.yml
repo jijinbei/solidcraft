@@ -24,7 +24,7 @@ jobs:
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
-        ref: 8e59199a0d49e8f8ca7d473be8ed96c863d2cd0e
+        ref: 3eb6aa4dad827b02de48ef2d7cdecb64c24d99a8
     - name: Install software Vulkan
       run: 'sudo apt-get update
 
@@ -37,7 +37,7 @@ jobs:
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
       with:
         name: nextest-archive
-        run-id: 38912242327
+        run-id: 38922067422
         github-token: ${{ github.token }}
     - name: Prepare captured PR workflow commands
       run: "cat > /tmp/paired-commands.json <<'COMMANDS'\n{\"1\": {\"before\": [{\"name\": \"Run tests\", \"argv\": [\"cargo\"\
@@ -53,43 +53,45 @@ jobs:
         cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\"\
         , \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\", \"slice:1/4\", \"--no-tests=pass\"]}, {\"\
         name\": \"Kernel regressions (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\", \"run\",\
-        \ \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\"\
-        , \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_0)\"\
-        ]}]}, \"2\": {\"before\": [{\"name\": \"Run tests\", \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\"\
-        , \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\"\
-        , \"ci\", \"--partition\", \"slice:2/4\"]}, {\"name\": \"Robustness goldens sample (pull requests that touch the kernel)\"\
-        , \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\"\
-        , \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"\
-        package(solidcraft-engine) & test(=tests::robustness_goldens::sample_1)\"]}, {\"name\": \"Tangent primitive boolean\
-        \ regression (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\"\
-        , \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\"\
-        , \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives)\"\
-        ]}], \"after\": [{\"name\": \"Run tests\", \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\"\
-        , \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\"\
-        , \"slice:2/4\", \"--no-tests=pass\"]}, {\"name\": \"Kernel regressions (pull requests that touch the kernel)\", \"\
-        argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"\
-        --extract-to\", \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-engine)\
-        \ & test(=tests::robustness_goldens::sample_1) | (package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives))\"\
-        ]}]}, \"3\": {\"before\": [{\"name\": \"Run tests\", \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\"\
-        , \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\"\
-        , \"ci\", \"--partition\", \"slice:3/4\"]}, {\"name\": \"Robustness goldens sample (pull requests that touch the kernel)\"\
-        , \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\"\
-        , \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"\
-        package(solidcraft-engine) & test(=tests::robustness_goldens::sample_2)\"]}, {\"name\": \"Tangent primitive boolean\
-        \ regression (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\"\
-        , \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\"\
-        , \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives)\"\
-        ]}], \"after\": [{\"name\": \"Run tests\", \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\"\
-        , \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\"\
-        , \"slice:3/4\", \"--no-tests=pass\"]}, {\"name\": \"Kernel regressions (pull requests that touch the kernel)\", \"\
-        argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"\
-        --extract-to\", \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-engine)\
-        \ & test(=tests::robustness_goldens::sample_2)\"]}]}, \"4\": {\"before\": [{\"name\": \"Run tests\", \"argv\": [\"\
+        \ \"--cargo-metadata\", \"target/nextest/cargo-metadata.json\", \"--binaries-metadata\", \"target/nextest/binaries-metadata.json\"\
+        , \"--workspace-remap\", \".\", \"--target-dir-remap\", \"target\", \"--profile\", \"ci\", \"--ignore-default-filter\"\
+        , \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_0)\"]}]}, \"2\": {\"before\": [{\"\
+        name\": \"Run tests\", \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\"\
+        , \".\", \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\", \"slice:2/4\"]},\
+        \ {\"name\": \"Robustness goldens sample (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\"\
+        , \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\"\
+        , \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_1)\"\
+        ]}, {\"name\": \"Tangent primitive boolean regression (pull requests that touch the kernel)\", \"argv\": [\"cargo\"\
+        , \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \"\
+        .\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-kernel)\
+        \ & test(=tests::boolean_identity_on_tangent_primitives)\"]}], \"after\": [{\"name\": \"Run tests\", \"argv\": [\"\
         cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\"\
-        , \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\", \"slice:4/4\"]}, {\"name\": \"Robustness\
-        \ goldens sample (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\"\
-        , \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\"\
-        , \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_3)\"\
+        , \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\", \"slice:2/4\", \"--no-tests=pass\"]}, {\"\
+        name\": \"Kernel regressions (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\", \"run\",\
+        \ \"--cargo-metadata\", \"target/nextest/cargo-metadata.json\", \"--binaries-metadata\", \"target/nextest/binaries-metadata.json\"\
+        , \"--workspace-remap\", \".\", \"--target-dir-remap\", \"target\", \"--profile\", \"ci\", \"--ignore-default-filter\"\
+        , \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_1) | (package(solidcraft-kernel)\
+        \ & test(=tests::boolean_identity_on_tangent_primitives))\"]}]}, \"3\": {\"before\": [{\"name\": \"Run tests\", \"\
+        argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"\
+        --extract-to\", \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\", \"slice:3/4\"]}, {\"name\"\
+        : \"Robustness goldens sample (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\", \"run\"\
+        , \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\"\
+        , \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_2)\"\
+        ]}, {\"name\": \"Tangent primitive boolean regression (pull requests that touch the kernel)\", \"argv\": [\"cargo\"\
+        , \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \"\
+        .\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-kernel)\
+        \ & test(=tests::boolean_identity_on_tangent_primitives)\"]}], \"after\": [{\"name\": \"Run tests\", \"argv\": [\"\
+        cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\"\
+        , \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\", \"slice:3/4\", \"--no-tests=pass\"]}, {\"\
+        name\": \"Kernel regressions (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\", \"run\",\
+        \ \"--cargo-metadata\", \"target/nextest/cargo-metadata.json\", \"--binaries-metadata\", \"target/nextest/binaries-metadata.json\"\
+        , \"--workspace-remap\", \".\", \"--target-dir-remap\", \"target\", \"--profile\", \"ci\", \"--ignore-default-filter\"\
+        , \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_2)\"]}]}, \"4\": {\"before\": [{\"\
+        name\": \"Run tests\", \"argv\": [\"cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\"\
+        , \".\", \"--extract-to\", \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\", \"slice:4/4\"]},\
+        \ {\"name\": \"Robustness goldens sample (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\"\
+        , \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\"\
+        , \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_3)\"\
         ]}, {\"name\": \"Tangent primitive boolean regression (pull requests that touch the kernel)\", \"argv\": [\"cargo\"\
         , \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \"\
         .\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-kernel)\
@@ -97,16 +99,17 @@ jobs:
         cargo\", \"nextest\", \"run\", \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\"\
         , \".\", \"--extract-overwrite\", \"--profile\", \"ci\", \"--partition\", \"slice:4/4\", \"--no-tests=pass\"]}, {\"\
         name\": \"Kernel regressions (pull requests that touch the kernel)\", \"argv\": [\"cargo\", \"nextest\", \"run\",\
-        \ \"--archive-file\", \"tests.tar.zst\", \"--workspace-remap\", \".\", \"--extract-to\", \".\", \"--extract-overwrite\"\
-        , \"--profile\", \"ci\", \"--ignore-default-filter\", \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_3)\"\
-        ]}]}}\nCOMMANDS\ncat > /tmp/paired-runner.py <<'PY'\nimport hashlib,json,os,subprocess,time,xml.etree.ElementTree\
-        \ as ET\nfrom pathlib import Path\nout=Path('timing-out');out.mkdir(exist_ok=True)\nshard=int(os.environ['SHARD'])\n\
-        commands=json.loads(Path('/tmp/paired-commands.json').read_text())[str(shard)]\ndef digest(p):\n h=hashlib.sha256()\n\
-        \ with open(p,'rb') as f:\n  for chunk in iter(lambda:f.read(1024*1024),b''):h.update(chunk)\n return h.hexdigest()\n\
-        archive_hash=digest('tests.tar.zst')\n(out/'archive.sha256').write_text(archive_hash+'\\n')\nfor name,args in [('cpu',['lscpu']),('cpu-count',['nproc']),('os',['uname','-a'])]:\n\
-        \ (out/(name+'.txt')).write_bytes(subprocess.check_output(args))\n(out/'image-version.txt').write_text(os.environ.get('ImageVersion','unknown'))\n\
-        (out/'clock-ticks.txt').write_text(str(os.sysconf('SC_CLK_TCK')))\n# Extract once for test discovery and hash each\
-        \ binary; both variants use the same archive.\nwith (out/'listing.json').open('w') as f:\n subprocess.run(['cargo','nextest','list','--archive-file','tests.tar.zst','--workspace-remap','.','--extract-to','.','--extract-overwrite','--profile','ci','--message-format','json'],stdout=f,check=True)\n\
+        \ \"--cargo-metadata\", \"target/nextest/cargo-metadata.json\", \"--binaries-metadata\", \"target/nextest/binaries-metadata.json\"\
+        , \"--workspace-remap\", \".\", \"--target-dir-remap\", \"target\", \"--profile\", \"ci\", \"--ignore-default-filter\"\
+        , \"-E\", \"package(solidcraft-engine) & test(=tests::robustness_goldens::sample_3)\"]}]}}\nCOMMANDS\ncat > /tmp/paired-runner.py\
+        \ <<'PY'\nimport hashlib,json,os,subprocess,time,xml.etree.ElementTree as ET\nfrom pathlib import Path\nout=Path('timing-out');out.mkdir(exist_ok=True)\n\
+        shard=int(os.environ['SHARD'])\ncommands=json.loads(Path('/tmp/paired-commands.json').read_text())[str(shard)]\ndef\
+        \ digest(p):\n h=hashlib.sha256()\n with open(p,'rb') as f:\n  for chunk in iter(lambda:f.read(1024*1024),b''):h.update(chunk)\n\
+        \ return h.hexdigest()\narchive_hash=digest('tests.tar.zst')\n(out/'archive.sha256').write_text(archive_hash+'\\n')\n\
+        for name,args in [('cpu',['lscpu']),('cpu-count',['nproc']),('os',['uname','-a'])]:\n (out/(name+'.txt')).write_bytes(subprocess.check_output(args))\n\
+        (out/'image-version.txt').write_text(os.environ.get('ImageVersion','unknown'))\n(out/'clock-ticks.txt').write_text(str(os.sysconf('SC_CLK_TCK')))\n\
+        # Extract once for test discovery and hash each binary; both variants use the same archive.\nwith (out/'listing.json').open('w')\
+        \ as f:\n subprocess.run(['cargo','nextest','list','--archive-file','tests.tar.zst','--workspace-remap','.','--extract-to','.','--extract-overwrite','--profile','ci','--message-format','json'],stdout=f,check=True)\n\
         listing=json.loads((out/'listing.json').read_text())\nbinary_hashes={s['binary-path']:digest(s['binary-path']) for\
         \ s in listing['rust-suites'].values()}\n(out/'binaries-before.json').write_text(json.dumps(binary_hashes,indent=2))\n\
         order=['before','after'] if shard%2 else ['after','before']\nresults=[];bad=False\nfor version in order:\n for index,call\
@@ -138,6 +141,36 @@ jobs:
         [[\"1 face(s) don't mesh\"], []]\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\
         FAILED\n\nfailures:\n\nfailures:\n    saved_box_sphere_union_scale_regression\n\ntest result: FAILED. 0 passed; 1\
         \ failed; 0 ignored; 0 measured; 12 filtered out; finished in 1.54s\n\nerror: test failed, to rerun pass `-p solidcraft-kernel\
+        \ --test boolean_props`\n\nEVIDENCE\ncat > timing-out/upstream-cylinder-sphere-failure.json <<'EVIDENCE'\n{\n  \"\
+        upstream_commit\": \"77b33efd8f0e8498f4d0d00697419d0992150759\",\n  \"operation\": \"Union\",\n  \"cylinder\": {\n\
+        \    \"base\": [\n      5,\n      10,\n      7.5\n    ],\n    \"axis\": [\n      0,\n      1,\n      0\n    ],\n \
+        \   \"radius\": 8.75,\n    \"height\": 20\n  },\n  \"sphere\": {\n    \"center\": [\n      2.5,\n      10,\n     \
+        \ 7.5\n    ],\n    \"radius\": 6.25\n  },\n  \"outcome\": \"KernelError: no result, curved-face fallback unavailable,\
+        \ including nudged retry\",\n  \"native_panics_guarded\": true,\n  \"reproduced_on_unmodified_main\": true,\n  \"\
+        status\": \"unfixed upstream issue; keep random property checks and preserve the counterexample\",\n  \"rng_seed\"\
+        : \"88d0bdab037e63a9c8fb3e7c1ddca0eb00d7a6181c340d8793fccb7144535086\"\n}\nEVIDENCE\ncat > timing-out/upstream-cylinder-sphere-probe.rs\
+        \ <<'EVIDENCE'\n\n#[test]\nfn saved_cylinder_sphere_tangent_union() {\n    let a = cylinder(Vec3::new(5.0, 10.0, 7.5),\
+        \ Vec3::Y, 8.75, 20.0).unwrap();\n    let b = sphere(Vec3::new(2.5, 10.0, 7.5), 6.25).unwrap();\n    let r = boolean(&a,\
+        \ &b, BoolOp::Union);\n    eprintln!(\"cylinder-sphere union: {:?}\", r.as_ref().map(|b| b.as_ref().map(|b| b.validity())));\n\
+        \    let body = r.expect(\"the union must succeed\").expect(\"the union must retain material\");\n    assert!(body.validity().is_empty());\n\
+        \    let exact = std::f64::consts::PI * 8.75_f64.powi(2) * 20.0\n        + (2.0 / 3.0) * std::f64::consts::PI * 6.25_f64.powi(3);\n\
+        \    let volume = measure(&body).unwrap().volume;\n    assert!((volume - exact).abs() < exact * 2e-3);\n}\n\nEVIDENCE\n\
+        cat > timing-out/upstream-cylinder-sphere-probe.log <<'EVIDENCE'\nrunning 1 test\ntest saved_cylinder_sphere_tangent_union\
+        \ ... cylinder-sphere union: Err(Failed(\"boolean Union: the operation failed: no result; the operation failed: not\
+        \ supported yet: the exact fallback for where the bodies meet (faces that touch, or cross at a shallow angle) takes\
+        \ planar faces only, and the target has 2 curved faces (cylinder) and the tool has 6 curved faces (sphere); nudged:\
+        \ the operation failed: boolean Union: the operation failed: no result; the operation failed: not supported yet: the\
+        \ exact fallback for where the bodies meet (faces that touch, or cross at a shallow angle) takes planar faces only,\
+        \ and the target has 2 curved faces (cylinder) and the tool has 6 curved faces (sphere)\"))\n\nthread 'saved_cylinder_sphere_tangent_union'\
+        \ (711656) panicked at crates/kernel/tests/boolean_props.rs:280:18:\nthe union must succeed: Failed(\"boolean Union:\
+        \ the operation failed: no result; the operation failed: not supported yet: the exact fallback for where the bodies\
+        \ meet (faces that touch, or cross at a shallow angle) takes planar faces only, and the target has 2 curved faces\
+        \ (cylinder) and the tool has 6 curved faces (sphere); nudged: the operation failed: boolean Union: the operation\
+        \ failed: no result; the operation failed: not supported yet: the exact fallback for where the bodies meet (faces\
+        \ that touch, or cross at a shallow angle) takes planar faces only, and the target has 2 curved faces (cylinder) and\
+        \ the tool has 6 curved faces (sphere)\")\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\
+        FAILED\n\nfailures:\n\nfailures:\n    saved_cylinder_sphere_tangent_union\n\ntest result: FAILED. 0 passed; 1 failed;\
+        \ 0 ignored; 0 measured; 12 filtered out; finished in 6.65s\n\nerror: test failed, to rerun pass `-p solidcraft-kernel\
         \ --test boolean_props`\n\nEVIDENCE\n"
     - name: Run both variants on this VM
       run: python3 /tmp/paired-runner.py
