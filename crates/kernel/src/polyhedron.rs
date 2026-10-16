@@ -559,8 +559,24 @@ fn shell_opened(b: &Body, healed: &Body, open: &[Vec3], opened: &[usize], thickn
     // and the opening is the open face's copy swept out through the body.
     let cavity = match offset_planar(healed, |fi, _| if opened.contains(&fi) { margin } else { -thickness }) {
         Ok(c) => c,
-        Err(e) => return shell_by_opening(healed, opened, thickness, margin).map_err(|_| e),
+        Err(e) => {
+            // A body-wide extension can cross the opposite wall of a narrow opening. Try
+            // clearing just the wall before constructing the swept-opening fallback.
+            let short_margin = thickness + size * 1e-4;
+            if short_margin < margin
+                && let Ok(cavity) = offset_planar(healed, |fi, _| if opened.contains(&fi) { short_margin } else { -thickness })
+                && let Ok(result) = cut_shell_cavity(b, healed, open, opened, thickness, short_margin, cavity)
+            {
+                return Ok(result);
+            }
+            return shell_by_opening(healed, opened, thickness, margin).map_err(|_| e);
+        }
     };
+    cut_shell_cavity(b, healed, open, opened, thickness, margin, cavity)
+}
+
+fn cut_shell_cavity(b: &Body, healed: &Body, open: &[Vec3], opened: &[usize], thickness: f64, margin: f64, cavity: Body) -> Result<Body> {
+    let size = healed.size();
     let r = crate::ops::boolean(healed, &cavity, crate::BoolOp::Cut);
     if r.is_err()
         && let Ok(x) = shell_by_opening(healed, opened, thickness, margin)

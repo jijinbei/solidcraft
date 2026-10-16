@@ -1559,6 +1559,40 @@ fn a_sketch_on_the_rim_a_shell_leaves() {
     reproduces(None, Value::Array(c));
 }
 
+/// A body-wide opening extension crossed the vent's opposite wall. These symmetric openings must
+/// produce the same valid shell, including after the document is evaluated from scratch.
+#[test]
+fn shell_of_a_pi_case_vent_keeps_its_opposite_wall() {
+    use solidcraft_engine::doc::{Document, kernel};
+
+    let source = load(&root().join("tests/action_matrix/designs/pi-case.solidcraft")).unwrap();
+    let original = kernel::measure(&source.model.state().body("Body1").unwrap().body).unwrap().volume;
+    let mut volumes = Vec::new();
+    for (y, z) in [(1.4999999999999407, 0.6666666666669683), (15.499999999999945, 0.6666666666666368)] {
+        let opening = Vec3::new(-3.333333333333333, y + 0.25, 1.0);
+        let opposite_wall = Vec3::new(-3.333333333333333, y - 3.25, 1.0);
+        let original_body = source.model.state().body("Body1").unwrap().body.clone();
+        assert!(original_body.contains(opening) && original_body.contains(opposite_wall));
+        let mut s = source.scratch();
+        s.execute("solid.shell", &json!({"faces": [[-3.333333333333333, y, z]], "thickness": 0.5})).unwrap();
+        check(&s, 0, &BTreeMap::new()).unwrap();
+        let body = s.model.state().body("Body1").unwrap().body.clone();
+        assert!(body.validity().is_empty(), "{:?}", body.validity());
+        assert!(!body.contains(opening), "the selected wall must open");
+        assert!(body.contains(opposite_wall), "the opposite wall must remain");
+        let volume = kernel::measure(&body).unwrap().volume;
+        assert!(volume > 0.0 && volume < original, "{volume} vs {original}");
+        let cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+        check(&cold, 0, &BTreeMap::new()).unwrap();
+        let reopened = cold.model.state().body("Body1").unwrap().body.clone();
+        assert!(reopened.validity().is_empty(), "{:?}", reopened.validity());
+        let reopened_volume = kernel::measure(&reopened).unwrap().volume;
+        assert!((volume - reopened_volume).abs() < volume * 1e-9, "{volume} vs {reopened_volume}");
+        volumes.push(volume);
+    }
+    assert!((volumes[0] - volumes[1]).abs() < original * 1e-9, "{volumes:?}");
+}
+
 #[test]
 #[ignore = "fails until #565 is fixed"]
 fn sketches_after_split_body_and_intersect() {
