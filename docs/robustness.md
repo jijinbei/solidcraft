@@ -44,7 +44,7 @@ for the design it left the bodies' total volume and area (within a relative 1e-6
 face, edge and shell counts (exact). `tests::robustness_goldens` fails on any change, better or
 worse, so a kernel change shows every seed it moves. Pull requests that touch `crates/kernel`
 run every 8th seed (`sample_0` … `sample_3`, about two minutes); pushes to `main` and the
-nightly run them all (`all_0` … `all_3`).
+nightly run them all (`all_0` … `all_95`, one seed per test).
 
 To record an intended change, give the reason:
 

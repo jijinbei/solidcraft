@@ -13,6 +13,7 @@ struct TestBin {
     label: String,
     exe: String,
     dir: String,
+    serial: bool,
 }
 
 /// Build the tests with `cargo_args` (e.g. `--locked`), run each binary with `test_args`, and run
@@ -29,6 +30,11 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
             scope.spawn(move || {
                 let t0 = Instant::now();
                 let mut c = Command::new(&b.exe);
+                // UI tests create separate apps but share process-wide theme and display settings. Unlike
+                // nextest's separate processes, libtest threads can change another test's render.
+                if b.serial && !test_args.iter().any(|arg| arg.starts_with("--test-threads")) {
+                    c.arg("--test-threads=1");
+                }
                 c.args(test_args).current_dir(&b.dir).env("CARGO_MANIFEST_DIR", &b.dir);
                 let _ = tx.send((b.label.clone(), finish(c), t0.elapsed().as_secs_f64()));
             });
@@ -89,7 +95,8 @@ fn build(cargo_args: &[&str]) -> Result<Vec<TestBin>, String> {
         let pkg = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kind = m["target"]["kind"][0].as_str().unwrap_or("");
         let label = format!("{pkg} {kind} {}", m["target"]["name"].as_str().unwrap_or(""));
-        bins.push(TestBin { label, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned() });
+        let serial = m["target"]["name"] == "solidcraft_ui_egui" && kind == "lib";
+        bins.push(TestBin { label, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned(), serial });
     }
     if bins.is_empty() {
         return Err("cargo test --no-run built no test executables".into());

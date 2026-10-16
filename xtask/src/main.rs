@@ -12,6 +12,7 @@ mod layers;
 mod licences;
 mod lists;
 mod test;
+mod toolchain;
 mod web_offline;
 mod web_offline_test;
 
@@ -334,6 +335,7 @@ fn cmd_oracle(cli: Option<&str>) -> Result<(), String> {
 /// Never break wasm: every layered crate (everything below the apps) and the web app must
 /// build for the browser.
 fn cmd_wasm() -> Result<(), String> {
+    toolchain::require_wasm_target()?;
     let (c, n) = wasm_check()?;
     run(c, &format!("cargo check --target wasm32-unknown-unknown ({n} crates)"))?;
     println!("wasm: {n} crates build for wasm32-unknown-unknown");
@@ -358,6 +360,7 @@ fn wasm_check() -> Result<(Command, usize), String> {
 /// The quick gates first, so they fail fast; the wasm check (and doc tests) run while the test
 /// binaries do, which leaves cargo's build lock free.
 fn cmd_ci() -> Result<(), String> {
+    toolchain::require_wasm_target()?;
     let mut c = cargo();
     c.args(["fmt", "--all", "--", "--check"]);
     run(c, "cargo fmt --check")?;

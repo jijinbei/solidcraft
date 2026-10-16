@@ -4,6 +4,10 @@
 `xtask licences --check`, `xtask layers`, clippy with `-D warnings`, the tests with the `ci`
 profile and the wasm build check.
 
+Before running those gates, `cargo xtask ci` checks for the active toolchain's wasm standard
+library. For `cargo +stable xtask ci`, install it with
+`rustup target add --toolchain stable wasm32-unknown-unknown`.
+
 | Harness | Where | What it catches |
 |---|---|---|
 | Unit and engine tests | next to the code, `*_tests.rs` | measured results: volume, area, topology counts against derived values |
@@ -67,6 +71,9 @@ Run `cargo xtask test` to build with this profile and run the test binaries conc
 with doc tests alongside. Arguments after `--` go to each test binary, for example
 `cargo xtask test -- shell`. To run the test binaries sequentially instead, use
 `cargo test --workspace --profile ci`.
+Within the UI library binary, xtask runs tests serially because apps share process-wide theme
+and display settings; other binaries still run concurrently. An explicit `--test-threads`
+argument overrides that default. GitHub's nextest runs each test in its own process.
 
 ## CI sharding and heavy tests
 
@@ -74,16 +81,27 @@ On GitHub, one job builds the tests into a
 [cargo-nextest](https://nexte.st/) archive and four jobs run a quarter of the tests each
 (`--partition slice:N/4`, settings in `.config/nextest.toml`); doc tests run in their own job.
 Pull requests skip a few heavy tests (each takes one to four minutes); they run on every push to
-`main`, nightly, and in `cargo xtask test`:
+`main`, nightly, and in `cargo xtask test`. Kernel changes also run the tangent-primitive boolean
+regression and a sample of robustness goldens. The kernel change detector includes `crates/kernel`,
+its `crates/geom` dependency, vendored truck crates, and workspace dependency/toolchain inputs:
 
 - `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness` and
-  `tests::robustness_goldens` (pull requests that touch `crates/kernel` run its `sample_*` part),
+  `tests::robustness_goldens` (kernel-related pull requests run its `sample_*` part),
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests
 - `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives`, and the `boolean_props` property tests
   (these run only in the nightly "Property tests" job: their inputs are random, so main skips them too)
 - `solidcraft-ui-egui` scenarios: `acceptance_sensor_enclosure`
+
+Kernel-related PRs run one robustness sample per shard after the ordinary tests. Shard 2 also
+runs the tangent-primitive regression once. Keeping these additions separate preserves the
+ordinary tests' shard assignments. Before the extra invocation, each shard saves its ordinary
+tests' JUnit report as `junit-main.xml`; the timing artifact includes both reports, including
+failures. The supplemental invocation reads the current archive's extracted Cargo and binary
+metadata, so the same executables run without unpacking the archive again.
+PR builds and tests otherwise follow the affected packages selected by
+`scripts/ci/affected.py`; unowned paths and shared configuration select the whole workspace.
 
 The **action matrix** (`apps/solidcraft-cli/tests/action_matrix.rs`) tries every ordinary action
 (sketch, offset plane, press pull, hole, draft, shell, fillet, chamfer, construction geometry, move,
