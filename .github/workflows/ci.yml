@@ -230,29 +230,43 @@ jobs:
       - name: Run tests
         env:
           EVENT_NAME: ${{ github.event_name }}
-          KERNEL_CHANGED: ${{ needs.changes.outputs.kernel }}
           SHARD: ${{ matrix.shard }}
         run: |
-          # Select once before partitioning, so every test runs once and shares one JUnit report.
-          selection=(--ignore-default-filter -E 'not (package(solidcraft-kernel) & binary(boolean_props))')
-          if [ "$EVENT_NAME" = pull_request ]; then
-            selection=()
-            if [ "$KERNEL_CHANGED" = true ]; then
-              selection=(--ignore-default-filter -E 'default()
-                | (package(solidcraft-engine) & test(/^tests::robustness_goldens::sample_[0-3]$/))
-                | (package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives))')
-            fi
+          # Pull requests skip the heavy tests (default-filter in .config/nextest.toml).
+          all=()
+          # The boolean property tests draw new random inputs every run; they run only in the
+          # nightly property-tests job, so a known kernel bug cannot turn main red at random.
+          if [ "$EVENT_NAME" != pull_request ]; then
+            all=(--ignore-default-filter -E 'not (package(solidcraft-kernel) & binary(boolean_props))')
           fi
           # Extract into ./target: tests that run a built binary (env!("CARGO_BIN_EXE_*")) have
           # the build job's path, which is the same checkout path here.
           cargo nextest run --archive-file tests.tar.zst --workspace-remap . --extract-to . --extract-overwrite \
-            --profile ci --partition "slice:$SHARD/4" --no-tests=pass "${selection[@]}"
+            --profile ci --partition "slice:$SHARD/4" --no-tests=pass "${all[@]}"
+      - name: Preserve ordinary test results
+        if: always()
+        run: |
+          if [ -f target/nextest/ci/junit.xml ]; then
+            mv target/nextest/ci/junit.xml target/nextest/ci/junit-main.xml
+          fi
+      - name: Kernel regressions (pull requests that touch the kernel)
+        # Keep the ordinary partition stable; run one sample per shard and the boolean once.
+        if: github.event_name == 'pull_request' && needs.changes.outputs.kernel == 'true'
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          regressions="package(solidcraft-engine) & test(=tests::robustness_goldens::sample_$((SHARD - 1)))"
+          if [ "$SHARD" = 2 ]; then
+            regressions+=" | (package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives))"
+          fi
+          cargo nextest run --archive-file tests.tar.zst --workspace-remap . --extract-to . --extract-overwrite \
+            --profile ci --ignore-default-filter -E "$regressions"
       - name: Upload test timings
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-${{ matrix.shard }}
-          path: target/nextest/ci/junit.xml
+          path: target/nextest/ci/junit*.xml
           retention-days: 7
 
   action-matrix:

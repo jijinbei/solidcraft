@@ -94,9 +94,12 @@ its `crates/geom` dependency, vendored truck crates, and workspace dependency/to
   (these run only in the nightly "Property tests" job: their inputs are random, so main skips them too)
 - `solidcraft-ui-egui` scenarios: `acceptance_sensor_enclosure`
 
-Kernel-related PRs add those regressions to the default test selection before partitioning.
-Each selected test runs once across the four shards, and each shard writes one JUnit report
-containing both its ordinary tests and any kernel regressions.
+Kernel-related PRs run one robustness sample per shard after the ordinary tests. Shard 2 also
+runs the tangent-primitive regression once. Keeping these additions separate preserves the
+ordinary tests' shard assignments. Before the extra invocation, each shard saves its ordinary
+tests' JUnit report as `junit-main.xml`; the timing artifact includes both reports, including
+failures. PR builds and tests otherwise follow the affected packages selected by
+`scripts/ci/affected.py`; unowned paths and shared configuration select the whole workspace.
 
 The **action matrix** (`apps/solidcraft-cli/tests/action_matrix.rs`) tries every ordinary action
 (sketch, offset plane, press pull, hole, draft, shell, fillet, chamfer, construction geometry, move,

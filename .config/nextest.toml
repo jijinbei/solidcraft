@@ -39,7 +39,7 @@ filter = "package(solidcraft-engine) & test(=tests::hostile_params_never_panic)"
 threads-required = "num-cpus"
 
 # This regression runs three geometry workers internally. Keep its CPU budget separate from
-# the ordinary tests now that kernel-related PRs select them in the same nextest invocation.
+# other regressions selected in the same nextest invocation.
 [[profile.ci.overrides]]
 filter = "package(solidcraft-kernel) & test(=tests::boolean_identity_on_tangent_primitives)"
 threads-required = "num-cpus"
