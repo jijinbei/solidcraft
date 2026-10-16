@@ -71,6 +71,9 @@ Run `cargo xtask test` to build with this profile and run the test binaries conc
 with doc tests alongside. Arguments after `--` go to each test binary, for example
 `cargo xtask test -- shell`. To run the test binaries sequentially instead, use
 `cargo test --workspace --profile ci`.
+Within the UI library binary, xtask runs tests serially because apps share process-wide theme
+and display settings; other binaries still run concurrently. An explicit `--test-threads`
+argument overrides that default. GitHub's nextest runs each test in its own process.
 
 ## CI sharding and heavy tests
 
