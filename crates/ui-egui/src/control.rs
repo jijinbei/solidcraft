@@ -46,12 +46,14 @@ use std::sync::mpsc::Sender;
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs;
 use solidcraft_engine::render::StandardView;
 use solidcraft_engine::{batch_params, timing};
 
 use crate::SolveApp;
+use crate::control_params as params;
 
 pub type ControlResponse = Value;
 
@@ -201,17 +203,6 @@ fn ui_state(app: &SolveApp) -> Value {
     u
 }
 
-fn key_from(name: &str) -> Option<egui::Key> {
-    egui::Key::from_name(name).or(match name.to_ascii_lowercase().as_str() {
-        "enter" | "return" => Some(egui::Key::Enter),
-        "esc" | "escape" => Some(egui::Key::Escape),
-        "delete" => Some(egui::Key::Delete),
-        "space" => Some(egui::Key::Space),
-        "tab" => Some(egui::Key::Tab),
-        _ => None,
-    })
-}
-
 /// Run one command as `engine.execute` does: through `app.run`, then the first-body fit and the
 /// camera the command asked for.
 fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
@@ -286,10 +277,11 @@ pub(crate) fn batch_step_command(step: &Value) -> Option<&str> {
 /// `rollback` (the default), the design goes back to its checkpoint. Step failures are part of
 /// the reply; refusals (`engine.batch unavailable: …`) come before anything runs, so the client
 /// can send the steps one by one instead.
-fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
-    let Some(steps) = p.get("commands").and_then(Value::as_array).filter(|s| s.len() <= MAX_BATCH) else {
+fn batch(app: &mut SolveApp, q: params::Batch) -> Outcome {
+    let steps = &q.commands;
+    if steps.len() > MAX_BATCH {
         return err(format!("engine.batch: commands must be an array of at most {MAX_BATCH} steps"));
-    };
+    }
     // (With the agent cursor shown, the pointer has already acted out a short summary of the
     // batch: `agent_cursor::intercept`.)
     if let Some(why) = batch_refusal(steps) {
@@ -299,16 +291,15 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
     if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
         return ok(refusal.reply(steps.len()));
     }
-    let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
-    let profile = p.get("profile").and_then(Value::as_bool).unwrap_or(false);
-    let timed = profile || p.get("timings").and_then(Value::as_bool).unwrap_or(false);
+    let (rollback, profile) = (q.rollback, q.profile);
+    let timed = profile || q.timings;
     let mut rows = Vec::new();
     let clock = timing::Clock::start();
     let checkpoint = if rollback { app.run("edit.checkpoint", json!({})).ok().and_then(|v| v["checkpoint"].as_u64()) } else { None };
     let mut results = Vec::with_capacity(steps.len());
     // With `coalesce_parameters`, each run of plain parameter edits rebuilds once (#5822); a run
     // whose combined edit is refused goes step by step, so a refused edit is named by its step.
-    let coalesce = p.get("coalesce_parameters").and_then(Value::as_bool).unwrap_or(false);
+    let coalesce = q.coalesce_parameters;
     for run in batch_params::plan(steps, coalesce) {
         let singles = match run {
             batch_params::BatchRun::Step(i) => vec![i],
@@ -424,16 +415,23 @@ pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> 
     vfs::scoped(Some(scope), || dispatch(app, ctx, &req.method, &p))
 }
 
+/// Run `f` on the params read as `T`, or refuse them.
+fn with<T: DeserializeOwned>(p: &Value, f: impl FnOnce(T) -> Outcome) -> Outcome {
+    match params::parse(p) {
+        Ok(t) => f(t),
+        Err(e) => err(e),
+    }
+}
+
 fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) -> Outcome {
     crate::render_workspace::sync_backend(app);
-    let q = Params(p);
     match method {
-        "ui.workspace" => ui_workspace(app, p),
-        "engine.execute" | "command" => {
-            let Some(id) = q.str("command").or(q.str("id")) else { return err("missing `command`") };
-            wrap(execute(app, id, p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
-        }
-        "engine.batch" => batch(app, p),
+        "ui.workspace" => with(p, |q| ui_workspace(app, q)),
+        "engine.execute" | "command" => with(p, |q: params::Execute| {
+            let id = q.command.clone();
+            wrap(execute(app, &id, q.params()))
+        }),
+        "engine.batch" => with(p, |q| batch(app, q)),
         "ui.agent_cursor" => ui_agent_cursor(app, p),
         "engine.script" => {
             let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
@@ -465,51 +463,43 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ui_inspect(app),
-        "ui.file" => {
-            let Some(path) = q.str("path") else { return err("path is required") };
-            if p.get("insert").and_then(Value::as_bool).unwrap_or(false) {
-                app.insert_path_async(path);
+        "ui.file" => with(p, |q: params::File| {
+            if q.insert {
+                app.insert_path_async(&q.path);
             } else {
-                app.open_path_async(path);
+                app.open_path_async(&q.path);
             }
             ok(json!({"busy": app.file_load.busy()}))
-        }
+        }),
         "ui.documents" => ok(crate::documents::control(app, p)),
-        "ui.home" => ui_home(app, p),
+        "ui.home" => with(p, |q| ui_home(app, q)),
         "ui.set" => ui_set(app, p),
-        "ui.view" => ui_view(app, p),
+        "ui.view" => with(p, |q| ui_view(app, q)),
         "ui.camera" => wrap(camera(app, p)),
         "ui.palette" => ui_palette(app, p),
-        "ui.start" => ui_start(app, p),
-        "ui.move" | "ui.click" => ui_move_click(app, method, p),
-        "ui.drag" => ui_drag(app, p),
-        "ui.editFeature" => ui_edit_feature(app, p),
+        "ui.start" => with(p, |q| ui_start(app, q)),
+        "ui.move" => with(p, |q| ui_move(app, q)),
+        "ui.click" => with(p, |q| ui_click(app, q)),
+        "ui.drag" => with(p, |q| ui_drag(app, q)),
+        "ui.editFeature" => with(p, |q| ui_edit_feature(app, q)),
         "ui.selection" => ui_selection(app),
         "ui.triad" => ui_triad(app),
-        "ui.dialogInput" => ui_dialog_input(app, p),
-        "ui.handles" => {
+        "ui.dialogInput" => with(p, |q| ui_dialog_input(app, q)),
+        "ui.handles" => with(p, |q: params::Handles| {
             // The handles drawn last frame (toolbar buttons `toolbar:<id>`, panels, browser rows…).
-            let list = crate::scenario::handles(q.str("prefix").unwrap_or(""));
+            let list = crate::scenario::handles(&q.prefix);
             ok(json!(list.into_iter().map(|(n, p)| json!({"name": n, "x": p.x, "y": p.y})).collect::<Vec<_>>()))
-        }
+        }),
         "ui.pick" => wrap(crate::view_pick::pick_command(app, p)),
-        "ui.at" => ui_at(app, p),
-        "ui.worldToScreen" => ui_world_to_screen(app, p),
-        "ui.sketchToScreen" => ui_sketch_to_screen(app, p),
-        "ui.scroll" => ui_scroll(app, ctx, p),
-        "ui.key" => {
-            let Some(key) = q.str("key").and_then(key_from) else { return err("unknown key") };
-            // Preserve the control channel's legacy primary-modifier alias. An explicit
-            // ctrl flag opts into physical Control/Command state (ctrl:false for Cmd alone).
-            let explicit_ctrl = p.get("ctrl").is_some();
-            let ctrl = if explicit_ctrl { q.flag("ctrl") } else { q.flag("cmd") };
-            let modifiers =
-                egui::Modifiers { shift: q.flag("shift"), alt: q.flag("alt"), ctrl, command: q.flag("cmd") || ctrl, mac_cmd: q.flag("cmd") && explicit_ctrl };
-            let pressed = match p.get("pressed") {
-                None => None,
-                Some(Value::Bool(pressed)) => Some(*pressed),
-                Some(_) => return err("pressed must be a boolean"),
-            };
+        "ui.at" => match params::At::parse(p) {
+            Ok(at) => ui_at(app, at),
+            Err(e) => err(e),
+        },
+        "ui.worldToScreen" => with(p, |q| ui_world_to_screen(app, q)),
+        "ui.sketchToScreen" => with(p, |q| ui_sketch_to_screen(app, q)),
+        "ui.scroll" => with(p, |q| ui_scroll(app, ctx, q)),
+        "ui.key" => with(p, |q: params::KeyPress| {
+            let (key, modifiers, pressed) = (q.key.0, q.modifiers(), q.pressed);
             app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
             if pressed != Some(false) {
                 app.synthetic.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
@@ -521,64 +511,62 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             }
             ok(Value::Null)
-        }
-        "ui.text" => {
-            app.synthetic.push(egui::Event::Text(q.str("text").unwrap_or("").to_string()));
+        }),
+        "ui.text" => with(p, |q: params::Text| {
+            app.synthetic.push(egui::Event::Text(q.text));
             ok(Value::Null)
-        }
+        }),
         "ui.icon_audit" => ui_icon_audit(app, p),
-        "ui.menu" => ui_menu(app, p),
-        "ui.confirm" => ui_confirm(app, p),
-        "ui.shortcut" => ui_shortcut(app, p),
+        "ui.menu" => match params::Menu::parse(p) {
+            Ok(menu) => ui_menu(app, menu),
+            Err(e) => err(e),
+        },
+        "ui.confirm" => with(p, |q| ui_confirm(app, q)),
+        "ui.shortcut" => with(p, |q| ui_shortcut(app, q)),
         "ui.browser" => ui_browser(app),
-        "ui.capture" => match q.str("action") {
-            Some(a) => match crate::browser::answer_capture(app, a) {
+        "ui.capture" => with(p, |q: params::Action| match q.action {
+            Some(a) => match crate::browser::answer_capture(app, &a) {
                 Ok(()) => ok(json!({"pending_moves": app.session.pending_moves.len()})),
                 Err(e) => err(e),
             },
             None => ok(json!({"question": app.tree.capture_prompt, "pending_moves": app.session.pending_moves.len()})),
-        },
+        }),
         "ui.prefs" => wrap(crate::prefs::control(app, p)),
         "ui.agent_chat" => wrap(crate::agent_chat::control(app, ctx, p)),
-        "ui.help" => ui_help(app, ctx, p),
+        "ui.help" => with(p, |q| ui_help(app, ctx, q)),
         "ui.selectOther" => wrap(crate::select_other::control(app, p)),
-        "ui.menuPick" => {
-            let Some(key) = q.str("item") else { return err("missing `item` (id or label)") };
-            wrap(crate::context_menu::pick(app, key))
-        }
-        "ui.rename" => {
-            if crate::context_menu::finish_rename(app, q.str("text"), p.get("commit").and_then(Value::as_bool).unwrap_or(true)) {
+        "ui.menuPick" => with(p, |q: params::MenuPick| wrap(crate::context_menu::pick(app, &q.item))),
+        "ui.rename" => with(p, |q: params::Rename| {
+            if crate::context_menu::finish_rename(app, q.text.as_deref(), q.commit) {
                 ok(json!({"done": true}))
             } else {
                 err("no rename in progress")
             }
-        }
-        "ui.window" => match crate::titlebar::window_action(app, ctx, q.str("action").unwrap_or("")) {
+        }),
+        "ui.window" => with(p, |q: params::Action| match crate::titlebar::window_action(app, ctx, q.action.as_deref().unwrap_or("")) {
             Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),
             Err(e) => err(e),
-        },
-        "ui.resize" => {
-            let (Some(w), Some(h)) = (q.num("width"), q.num("height")) else { return err("missing width/height") };
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w.clamp(320.0, 8192.0) as f32, h.clamp(240.0, 8192.0) as f32)));
+        }),
+        "ui.resize" => with(p, |q: params::Resize| {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                q.width.clamp(320.0, 8192.0) as f32,
+                q.height.clamp(240.0, 8192.0) as f32,
+            )));
             ok(Value::Null)
-        }
-        "ui.screenshot" => match q.str("path").map(vfs::check) {
+        }),
+        "ui.screenshot" => with(p, |q: params::Screenshot| match q.path.as_deref().map(vfs::check) {
             Some(Err(e)) => err(e),
-            _ => Outcome::Screenshot { path: q.str("path").map(str::to_string) },
-        },
-        "ui.render" => ui_render(app, p),
-        "app.quit" => app_quit(app, ctx, p),
+            _ => Outcome::Screenshot { path: q.path },
+        }),
+        "ui.render" => with(p, |q| ui_render(app, q)),
+        "app.quit" => with(p, |q| app_quit(app, ctx, q)),
         other => err(format!("unknown method `{other}`")),
     }
 }
 
 /// `ui.editFeature {feature}`: open a feature's edit dialog.
-fn ui_edit_feature(app: &mut SolveApp, p: &Value) -> Outcome {
-    let key = match p.get("feature") {
-        Some(Value::Number(n)) => n.to_string(),
-        Some(Value::String(x)) => x.clone(),
-        _ => return err("`feature` must be an id or name"),
-    };
+fn ui_edit_feature(app: &mut SolveApp, q: params::EditFeature) -> Outcome {
+    let key = q.feature.key();
     let Some(id) = app.session.doc.find_feature(&key).map(|f| f.id) else { return err(format!("no feature `{key}`")) };
     app.edit_feature(id);
     ok(json!({"dialog": app.dialog.as_ref().map(|d| format!("{d:?}")), "marker": app.session.doc.marker}))
@@ -635,30 +623,20 @@ fn ui_triad(app: &SolveApp) -> Outcome {
 }
 
 /// `ui.confirm {accept?}`: the Delete confirmation.
-fn ui_confirm(app: &mut SolveApp, p: &Value) -> Outcome {
-    match p.get("accept").and_then(Value::as_bool) {
-        Some(a) => {
-            if crate::delete::confirm(app, a) {
-                ok(json!({"accepted": a}))
-            } else {
-                err("nothing is waiting for a confirmation")
-            }
-        }
-        None => ok(json!({"pending": app.menu.confirm.as_ref().map(|c| c.report.clone())})),
-    }
+fn ui_confirm(app: &mut SolveApp, q: params::Confirm) -> Outcome {
+    let Some(a) = q.accept else { return ok(json!({"pending": app.menu.confirm.as_ref().map(|c| c.report.clone())})) };
+    if crate::delete::confirm(app, a) { ok(json!({"accepted": a})) } else { err("nothing is waiting for a confirmation") }
 }
 
 /// `ui.shortcut {command, key?, replace?}`: a command's key, or bind one.
-fn ui_shortcut(app: &mut SolveApp, p: &Value) -> Outcome {
-    let q = Params(p);
-    let Some(id) = q.str("command") else { return err("missing `command`") };
-    match q.str("key") {
-        Some(k) => match crate::keymap::bind(app, id, k, q.flag("replace")) {
-            Ok(()) => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
-            Err(e) => err(e),
-        },
-        None => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
+fn ui_shortcut(app: &mut SolveApp, q: params::Shortcut) -> Outcome {
+    let id = q.command.as_str();
+    if let Some(k) = &q.key
+        && let Err(e) = crate::keymap::bind(app, id, k, q.replace)
+    {
+        return err(e);
     }
+    ok(json!({"command": id, "key": crate::keymap::effective(app, id)}))
 }
 
 /// `ui.browser`: the browser rows drawn last frame and what is picked.
@@ -672,15 +650,11 @@ fn ui_browser(app: &SolveApp) -> Outcome {
 }
 
 /// `ui.workspace {workspace?}`: enter the design or render workspace; returns the one shown.
-fn ui_workspace(app: &mut SolveApp, p: &Value) -> Outcome {
-    let q = Params(p);
-    if let Some(workspace) = q.str("workspace") {
-        if !matches!(workspace, "design" | "render") {
-            return err("workspace must be design or render");
-        }
-        if let Err(e) = crate::render_workspace::enter(app, workspace == "render") {
-            return err(e);
-        }
+fn ui_workspace(app: &mut SolveApp, q: params::WorkspaceParams) -> Outcome {
+    if let Some(w) = q.workspace
+        && let Err(e) = crate::render_workspace::enter(app, w == params::Workspace::Render)
+    {
+        return err(e);
     }
     ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
 }
@@ -737,8 +711,8 @@ fn ui_inspect(app: &SolveApp) -> Outcome {
 }
 
 /// `ui.home {open?, sample?}`: the Home page.
-fn ui_home(app: &mut SolveApp, p: &Value) -> Outcome {
-    match p.get("open").and_then(Value::as_bool) {
+fn ui_home(app: &mut SolveApp, q: params::Home) -> Outcome {
+    match q.open {
         Some(true) => {
             let rev = app.session.revision;
             app.home.show(rev);
@@ -746,8 +720,8 @@ fn ui_home(app: &mut SolveApp, p: &Value) -> Outcome {
         Some(false) => app.home.open = false,
         None => {}
     }
-    if let Some(i) = p.get("sample").and_then(Value::as_u64) {
-        crate::home::open_sample(app, i as usize);
+    if let Some(i) = q.sample {
+        crate::home::open_sample(app, i);
     }
     ok(json!({"open": app.home.open, "recent": app.home.recent}))
 }
@@ -810,11 +784,10 @@ fn ui_set(app: &mut SolveApp, p: &Value) -> Outcome {
 }
 
 /// `ui.view {view, animate?}`: a standard view, snapped or animated.
-fn ui_view(app: &mut SolveApp, p: &Value) -> Outcome {
-    let q = Params(p);
-    let v = q.str("view").unwrap_or("home");
+fn ui_view(app: &mut SolveApp, q: params::View) -> Outcome {
+    let v = q.view.as_str();
     app.viewport.orbit_free = None;
-    if p.get("animate").and_then(Value::as_bool).unwrap_or(false) {
+    if q.animate {
         if v != "fit" && v != "home" && StandardView::parse(v).is_none() {
             return err(format!("unknown view `{v}`"));
         }
@@ -836,25 +809,23 @@ fn ui_view(app: &mut SolveApp, p: &Value) -> Outcome {
     ok(json!(app.cam))
 }
 
-/// `ui.start {command, params?}`: like clicking the toolbar button.
-fn ui_start(app: &mut SolveApp, p: &Value) -> Outcome {
-    let q = Params(p);
-    let Some(id) = q.str("command") else { return err("missing `command`") };
-    // `params`: what the dialog opens on. Refused: nothing starts, or the dialog closes.
-    let params = p.get("params").filter(|v| !v.is_null());
-    if params.is_some() && id != "joint.drive" && id != "motion.study" {
-        return err(format!("`{id}` takes no ui.start params yet (joint.drive takes joint, values; motion.study takes study)"));
-    }
+/// `ui.start {command, params?}`: like clicking the toolbar button. `params`: what the dialog
+/// opens on (joint.drive, motion.study). Refused: nothing starts, or the dialog closes.
+fn ui_start(app: &mut SolveApp, q: params::Start) -> Outcome {
+    let id = q.command.as_str();
+    let preset = match (id, q.params) {
+        (_, Value::Null) => None,
+        ("joint.drive" | "motion.study", params) => Some(params),
+        _ => return err(format!("`{id}` takes no ui.start params yet (joint.drive takes joint, values; motion.study takes study)")),
+    };
     app.start(id);
-    if let Some(params) = params.filter(|_| id == "motion.study") {
+    let Some(params) = preset else { return started(app) };
+    let set = if id == "motion.study" {
         let Some(crate::dialogs::Kind::Motion(k)) = app.dialog.as_mut().map(|d| &mut d.kind) else {
             return err("Motion Study did not open");
         };
-        if let Err(e) = crate::dialogs_motion::preset(&app.session, k, params) {
-            crate::dialogs::cancel(app);
-            return err(e);
-        }
-    } else if let Some(params) = params {
+        crate::dialogs_motion::preset(&app.session, k, &params)
+    } else {
         if app.tree.capture_prompt.is_some() {
             return err("Drive Joints waits for the Capture Position question (ui.capture)");
         }
@@ -862,78 +833,58 @@ fn ui_start(app: &mut SolveApp, p: &Value) -> Outcome {
             let why = app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
             return err(why.unwrap_or_else(|| "Drive Joints did not open".into()));
         };
-        if let Err(e) = crate::dialogs_assembly::preset(&app.session, k, params) {
-            crate::dialogs::cancel(app);
-            return err(e);
-        }
+        crate::dialogs_assembly::preset(&app.session, k, &params)
+    };
+    if let Err(e) = set {
+        crate::dialogs::cancel(app);
+        return err(e);
     }
+    started(app)
+}
+
+/// What `ui.start` started.
+fn started(app: &SolveApp) -> Outcome {
     ok(json!({"tool": app.tool.as_ref().map(|t| t.cmd), "dialog": app.dialog.as_ref().map(|d| format!("{d:?}"))}))
 }
 
-/// `ui.move {x, y}` and `ui.click {x, y, button?, shift?, double?}`: pointer input.
-fn ui_move_click(app: &mut SolveApp, method: &str, p: &Value) -> Outcome {
-    let q = Params(p);
-    let (Some(x), Some(y)) = (q.num("x"), q.num("y")) else { return err("missing x/y") };
-    if x.abs() > 1e6 || y.abs() > 1e6 {
-        return err("x/y must be within ±1000000 screen points");
-    }
-    let pos = egui::pos2(x as f32, y as f32);
-    let modifiers = if method == "ui.move" {
-        egui::Modifiers {
-            shift: q.flag("shift"),
-            alt: q.flag("alt"),
-            ctrl: q.flag("ctrl"),
-            command: q.flag("ctrl") || q.flag("cmd"),
-            mac_cmd: q.flag("cmd"),
-        }
-    } else {
-        egui::Modifiers::NONE
-    };
-    app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
+/// `ui.move {x, y, shift?, ctrl?, alt?, cmd?}`: the pointer moves, with those keys held.
+fn ui_move(app: &mut SolveApp, q: params::Move) -> Outcome {
+    app.synthetic.push(egui::Event::ModifiersChanged(q.mods.held()));
+    app.synthetic.push(egui::Event::PointerMoved(q.at.0));
+    ok(Value::Null)
+}
+
+/// `ui.click {x, y, button?, shift?, ctrl?, alt?, double?}`: a click there.
+fn ui_click(app: &mut SolveApp, q: params::Click) -> Outcome {
+    let (pos, button, modifiers) = (q.at.0, q.button.egui(), q.mods.press());
+    app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
     app.synthetic.push(egui::Event::PointerMoved(pos));
-    if method == "ui.click" {
-        let button = match q.str("button") {
-            Some("right") => egui::PointerButton::Secondary,
-            Some("middle") => egui::PointerButton::Middle,
-            _ => egui::PointerButton::Primary,
-        };
-        let modifiers =
-            egui::Modifiers { shift: q.flag("shift"), ctrl: q.flag("ctrl"), command: q.flag("ctrl"), alt: q.flag("alt"), ..Default::default() };
-        // `double: true` sends two clicks in one frame, which egui reads as a double-click.
-        for _ in 0..if q.flag("double") { 2 } else { 1 } {
-            app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers });
-            app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers });
-        }
+    // `double: true` sends two clicks in one frame, which egui reads as a double-click.
+    for _ in 0..if q.double { 2 } else { 1 } {
+        app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: true, modifiers });
+        app.synthetic.push(egui::Event::PointerButton { pos, button, pressed: false, modifiers });
     }
     ok(Value::Null)
 }
 
 /// `ui.drag {x0, y0, x1, y1, button?, steps?, hold?, hold_end?}`: press, move, release.
-fn ui_drag(app: &mut SolveApp, p: &Value) -> Outcome {
-    let q = Params(p);
-    let (Some(x0), Some(y0), Some(x1), Some(y1)) = (q.num("x0"), q.num("y0"), q.num("x1"), q.num("y1")) else { return err("missing x0/y0/x1/y1") };
-    let button = match q.str("button") {
-        Some("right") => egui::PointerButton::Secondary,
-        Some("middle") => egui::PointerButton::Middle,
-        _ => egui::PointerButton::Primary,
-    };
-    let modifiers =
-        egui::Modifiers { shift: q.flag("shift"), ctrl: q.flag("ctrl"), command: q.flag("ctrl"), alt: q.flag("alt"), ..Default::default() };
-    let (a, z) = (egui::pos2(x0 as f32, y0 as f32), egui::pos2(x1 as f32, y1 as f32));
+fn ui_drag(app: &mut SolveApp, q: params::Drag) -> Outcome {
+    let (button, modifiers) = (q.button.egui(), q.mods.press());
+    let (a, z) = (egui::pos2(q.x0 as f32, q.y0 as f32), egui::pos2(q.x1 as f32, q.y1 as f32));
     // Positioning precedes the press by a frame: it is not a modifier-only gesture.
     app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
     app.synthetic.push(egui::Event::PointerMoved(a));
     app.synthetic.push(egui::Event::PointerButton { pos: a, button, pressed: true, modifiers });
     // `hold`: frames to keep the button down before moving (press-and-hold).
-    for _ in 0..q.num("hold").unwrap_or(0.0).clamp(0.0, 600.0) as usize {
+    for _ in 0..q.hold.clamp(0.0, 600.0) as usize {
         app.synthetic.push(egui::Event::PointerMoved(a));
     }
-    let steps = q.num("steps").unwrap_or(10.0).clamp(1.0, 200.0) as usize;
+    let steps = q.steps.clamp(1.0, 200.0) as usize;
     for k in 1..=steps {
         app.synthetic.push(egui::Event::PointerMoved(a + (z - a) * (k as f32 / steps as f32)));
     }
     // `hold_end`: frames to keep the button down at the end (to look at a drag's snap).
-    for _ in 0..q.num("hold_end").unwrap_or(0.0).clamp(0.0, 600.0) as usize {
+    for _ in 0..q.hold_end.clamp(0.0, 600.0) as usize {
         app.synthetic.push(egui::Event::PointerMoved(z));
     }
     app.synthetic.push(egui::Event::PointerButton { pos: z, button, pressed: false, modifiers });
@@ -941,9 +892,9 @@ fn ui_drag(app: &mut SolveApp, p: &Value) -> Outcome {
 }
 
 /// `ui.dialogInput {index}`: the selection input picks go to.
-fn ui_dialog_input(app: &mut SolveApp, p: &Value) -> Outcome {
+fn ui_dialog_input(app: &mut SolveApp, q: params::DialogInput) -> Outcome {
     // What clicking a selection input's chip does: make it the one picks go to.
-    let i = p.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let i = q.index;
     match app.dialog.as_mut() {
         Some(d) if i < d.inputs.len() => {
             d.active = i;
@@ -954,124 +905,79 @@ fn ui_dialog_input(app: &mut SolveApp, p: &Value) -> Outcome {
 }
 
 /// `ui.at {…}`: the screen point of a row, handle, dimension or model point.
-fn ui_at(app: &mut SolveApp, p: &Value) -> Outcome {
-    let q = Params(p);
-    if let Some(path) = p.get("occurrence").and_then(Value::as_array) {
-        let ids: Option<Vec<u64>> = path.iter().map(Value::as_u64).collect();
-        let Some(ids) = ids else { return err("occurrence path must contain integer ids") };
-        let key = ids.iter().map(u64::to_string).collect::<Vec<_>>().join("/");
-        let control = q.str("control").unwrap_or("row");
-        return match crate::scenario::handle_at(&format!("{control}:occurrence:{key}")) {
-            Some(q) => ok(json!([q.x, q.y])),
-            None => err("occurrence row or control is not shown"),
-        };
-    }
-    // A scenario point: {world: [x,y,z]} | {sketch: [x,y]} | {plane: "XY"} (the middle of an
-    // origin plane's square) → screen point.
-    if let Some(h) = p.get("handle").and_then(Value::as_str) {
-        return match crate::scenario::handle_at(h) {
-            Some(q) => ok(json!([q.x, q.y])),
-            None => err(format!("handle {h} is not shown")),
-        };
-    }
-    // A browser row by its label: the row itself, or its fold arrow.
-    for (k, chevron) in [("browser", false), ("chevron", true)] {
-        if let Some(label) = p.get(k).and_then(Value::as_str) {
-            let rows = crate::browser::drawn_rows();
-            let found = rows
-                .iter()
-                .find(|r| r.0 == label)
-                .and_then(|r| if chevron { r.2.map(|f| f.center()) } else { Some(r.1.left_center() + egui::vec2(120.0, 0.0)) });
-            return match found {
-                Some(q) => ok(json!([q.x, q.y])),
-                None => err(format!("no browser row `{label}`{} on screen", if chevron { " with a fold arrow" } else { "" })),
-            };
+fn ui_at(app: &mut SolveApp, at: params::At) -> Outcome {
+    use params::At;
+    let shown = |found: Option<egui::Pos2>, what: String| match found {
+        Some(q) => ok(json!([q.x, q.y])),
+        None => err(what),
+    };
+    let world = match at {
+        At::Occurrence { key, control } => {
+            return shown(crate::scenario::handle_at(&format!("{control}:occurrence:{key}")), "occurrence row or control is not shown".into());
         }
-    }
-    if let Some(d) = p.get("dimension").and_then(Value::as_str) {
-        return match crate::dim_view::text_at(d) {
-            Some(q) => ok(json!([q.x, q.y])),
-            None => err(format!("dimension {d} is not shown")),
-        };
-    }
+        At::Handle(h) => return shown(crate::scenario::handle_at(&h), format!("handle {h} is not shown")),
+        At::Browser { label, chevron } => {
+            let rows = crate::browser::drawn_rows();
+            let row = rows.iter().find(|r| r.0 == label);
+            let found = if chevron { row.and_then(|r| r.2.map(|f| f.center())) } else { row.map(|r| r.1.left_center() + egui::vec2(120.0, 0.0)) };
+            return shown(found, format!("no browser row `{label}`{} on screen", if chevron { " with a fold arrow" } else { "" }));
+        }
+        At::Dimension(d) => return shown(crate::dim_view::text_at(&d), format!("dimension {d} is not shown")),
+        At::World(w) => Some(w),
+        At::Sketch(s) => {
+            let st = app.session.world_state();
+            app.session.active_sketch.and_then(|id| st.sketch(id)).map(|ss| ss.plane.to_world(s))
+        }
+        At::Plane(n) => {
+            let Some(rect) = app.viewport.rect else { return err("no viewport") };
+            crate::viewport::origin_plane_target(app, &crate::viewport::projection(app, rect), &n)
+        }
+        At::Axis(n) => {
+            let size = crate::selection::origin_size(app.cam.half_height());
+            crate::viewport::origin_axes(app).into_iter().find(|(name, _)| *name == n).map(|(_, d)| d * (size * 0.8))
+        }
+        At::Gizmo { name, by, turn } => crate::gizmo::handle_point(&name, by, turn),
+    };
     let Some(rect) = app.viewport.rect else { return err("no viewport") };
     let proj = crate::viewport::projection(app, rect);
-    let num = |v: &Value, i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-    let world = if let Some(w) = p.get("world") {
-        Some(solidcraft_engine::geom::Vec3::new(num(w, 0), num(w, 1), num(w, 2)))
-    } else if let Some(s) = p.get("sketch") {
-        let st = app.session.world_state();
-        app.session.active_sketch.and_then(|id| st.sketch(id)).map(|ss| ss.plane.to_world(solidcraft_engine::geom::Vec2::new(num(s, 0), num(s, 1))))
-    } else if let Some(n) = p.get("plane").and_then(Value::as_str) {
-        crate::viewport::origin_plane_target(app, &proj, n)
-    } else if let Some(n) = p.get("axis").and_then(Value::as_str) {
-        // Along an origin axis, on its solid part.
-        let size = crate::selection::origin_size(app.cam.half_height());
-        crate::viewport::origin_axes(app).into_iter().find(|(name, _)| *name == n).map(|(_, d)| d * (size * 0.8))
-    } else if let Some(n) = p.get("gizmo").and_then(Value::as_str) {
-        // A handle of the move triad ("x", "xy", "rz", "ball"), moved `by` [x,y,z] mm or
-        // turned `turn` degrees (rings).
-        let by = p.get("by").map(|b| solidcraft_engine::geom::Vec3::new(num(b, 0), num(b, 1), num(b, 2))).unwrap_or_default();
-        crate::gizmo::handle_point(n, by, p.get("turn").and_then(Value::as_f64).unwrap_or(0.0))
-    } else {
-        None
-    };
-    match world.and_then(|w| proj.to_screen(w)) {
-        Some(q) => ok(json!([q.x, q.y])),
-        None => err(format!("not on screen: {}", p)),
-    }
+    shown(world.and_then(|w| proj.to_screen(w)), "not on screen".into())
 }
 
 /// `ui.worldToScreen {points}`: screen points of world points.
-fn ui_world_to_screen(app: &mut SolveApp, p: &Value) -> Outcome {
+fn ui_world_to_screen(app: &mut SolveApp, q: params::Points<[f64; 3]>) -> Outcome {
     let Some(rect) = app.viewport.rect else { return err("no viewport") };
     let proj = crate::viewport::projection(app, rect);
-    let pts: Vec<Value> = p
-        .get("points")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .take(1000)
-        .map(|v| {
-            let c = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-            proj.to_screen(solidcraft_engine::geom::Vec3::new(c(0), c(1), c(2))).map_or(Value::Null, |q| json!([q.x, q.y]))
-        })
+    let pts: Vec<Value> = q
+        .points
+        .iter()
+        .map(|&[x, y, z]| proj.to_screen(solidcraft_engine::geom::Vec3::new(x, y, z)).map_or(Value::Null, |q| json!([q.x, q.y])))
         .collect();
     ok(json!(pts))
 }
 
 /// `ui.sketchToScreen {points}`: screen points of active-sketch coordinates.
-fn ui_sketch_to_screen(app: &mut SolveApp, p: &Value) -> Outcome {
+fn ui_sketch_to_screen(app: &mut SolveApp, q: params::Points<[f64; 2]>) -> Outcome {
     // Screen points of active-sketch coordinates (for driving sketch interaction).
     let st = app.session.world_state();
     let (Some(rect), Some(ss)) = (app.viewport.rect, app.session.active_sketch.and_then(|s| st.sketch(s))) else {
         return err("no active sketch in a drawn viewport");
     };
     let proj = crate::viewport::projection(app, rect);
-    let pts: Vec<Value> = p
-        .get("points")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .take(1000)
-        .map(|v| {
-            let c = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-            let q = solidcraft_engine::geom::Vec2::new(c(0), c(1));
-            proj.to_screen(ss.plane.to_world(q)).map_or(Value::Null, |p| json!([p.x, p.y]))
-        })
+    let pts: Vec<Value> = q
+        .points
+        .iter()
+        .map(|&[x, y]| proj.to_screen(ss.plane.to_world(solidcraft_engine::geom::Vec2::new(x, y))).map_or(Value::Null, |p| json!([p.x, p.y])))
         .collect();
     ok(json!(pts))
 }
 
 /// `ui.scroll {x, y, delta}`: mouse-wheel input.
-fn ui_scroll(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Outcome {
-    let q = Params(p);
-    let (Some(x), Some(y)) = (q.num("x"), q.num("y")) else { return err("missing x/y") };
-    app.synthetic.push(egui::Event::PointerMoved(egui::pos2(x as f32, y as f32)));
+fn ui_scroll(app: &mut SolveApp, ctx: &egui::Context, q: params::Scroll) -> Outcome {
+    app.synthetic.push(egui::Event::PointerMoved(q.at.0));
     // Mouse-wheel semantics (lines): zooms regardless of the trackpad pan
     // preference, so scripts and agents keep working. Trackpads report points.
     let speed = ctx.options(|o| o.input_options.line_scroll_speed).max(1.0);
-    let lines = q.num("delta").unwrap_or(-100.0) / f64::from(speed);
+    let lines = q.delta / f64::from(speed);
     app.synthetic.push(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Line,
         delta: egui::vec2(0.0, lines as f32),
@@ -1082,56 +988,40 @@ fn ui_scroll(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Outcome {
 }
 
 /// `ui.menu {x?, y?, target?, close?}`: the context menu.
-fn ui_menu(app: &mut SolveApp, p: &Value) -> Outcome {
-    let q = Params(p);
-    if q.flag("close") {
-        crate::context_menu::close(app);
-        return ok(json!({"open": false}));
+fn ui_menu(app: &mut SolveApp, menu: params::Menu) -> Outcome {
+    match menu {
+        params::Menu::Close => {
+            crate::context_menu::close(app);
+            ok(json!({"open": false}))
+        }
+        params::Menu::Open { at, target } => {
+            crate::context_menu::request_open(app, at.0, target);
+            ok(json!({"pending": true}))
+        }
+        params::Menu::Describe => ok(crate::context_menu::describe(app)),
     }
-    if let (Some(x), Some(y)) = (q.num("x"), q.num("y")) {
-        let target = match p.get("target") {
-            Some(v) => match serde_json::from_value::<crate::context_menu::Target>(v.clone()) {
-                Ok(t) => t,
-                Err(e) => return err(e),
-            },
-            None => crate::context_menu::Target::Viewport,
-        };
-        crate::context_menu::request_open(app, egui::pos2(x as f32, y as f32), target);
-        return ok(json!({"pending": true}));
-    }
-    ok(crate::context_menu::describe(app))
 }
 
 /// `ui.help {item?}`: the Help menu; the version and diagnostics.
-fn ui_help(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Outcome {
-    let q = Params(p);
-    match q.str("item") {
-        Some(i @ ("about" | "shortcuts" | "report" | "crashes")) => {
-            crate::help::run(app, ctx, i);
-            ok(
-                json!({"diagnostics": crate::help::diagnostics(app), "version": crate::help::VERSION, "commit": crate::help::COMMIT, "built": crate::help::BUILD_DATE}),
-            )
-        }
-        _ => ok(
-            json!({"diagnostics": crate::help::diagnostics(app), "version": crate::help::VERSION, "commit": crate::help::COMMIT, "built": crate::help::BUILD_DATE}),
-        ),
+fn ui_help(app: &mut SolveApp, ctx: &egui::Context, q: params::Help) -> Outcome {
+    if let Some(item) = q.item {
+        crate::help::run(app, ctx, item.name());
     }
+    ok(
+        json!({"diagnostics": crate::help::diagnostics(app), "version": crate::help::VERSION, "commit": crate::help::COMMIT, "built": crate::help::BUILD_DATE}),
+    )
 }
 
 /// `ui.render {path?, width?, height?, grid?, axes?}`: a headless render of the view.
-fn ui_render(app: &mut SolveApp, p: &Value) -> Outcome {
-    let q = Params(p);
-    let w = q.num("width").unwrap_or(1280.0).clamp(16.0, 8192.0) as u32;
-    let h = q.num("height").unwrap_or(800.0).clamp(16.0, 8192.0) as u32;
+fn ui_render(app: &mut SolveApp, q: params::Render) -> Outcome {
+    let w = q.width.clamp(16.0, 8192.0) as u32;
+    let h = q.height.clamp(16.0, 8192.0) as u32;
     // As the window shows it (`view_scene`). The grid and the axes as the window shows
     // them, unless the request says: `grid` and `axes` leave them out or put them in.
     let shown = window_guides(app);
-    let guides = solidcraft_engine::view::Guides {
-        grid: p.get("grid").and_then(Value::as_bool).unwrap_or(shown.grid),
-        axes: p.get("axes").and_then(Value::as_bool).unwrap_or(shown.axes),
-    };
+    let guides = solidcraft_engine::view::Guides { grid: q.grid.unwrap_or(shown.grid), axes: q.axes.unwrap_or(shown.axes) };
     // A path outside the request's folders is refused before anything is drawn.
-    if let Some(Err(e)) = q.str("path").map(vfs::check) {
+    if let Some(Err(e)) = q.path.as_deref().map(vfs::check) {
         return err(e);
     }
     let scene = view_scene(app, guides);
@@ -1141,8 +1031,8 @@ fn ui_render(app: &mut SolveApp, p: &Value) -> Outcome {
     };
     // What drew it (gpu, gpu-software or cpu), and the warning a CPU render carries.
     let (renderer, warning) = (png.renderer, solidcraft_engine::capture::warning(png.renderer));
-    match q.str("path") {
-        Some(path) => match vfs::check(path).and_then(|()| std::fs::write(path, &png.bytes)) {
+    match q.path {
+        Some(path) => match vfs::check(&path).and_then(|()| std::fs::write(&path, &png.bytes)) {
             Ok(()) => ok(json!({"path": path, "bytes": png.bytes.len(), "renderer": renderer, "warning": warning})),
             Err(e) => err(e),
         },
@@ -1151,9 +1041,9 @@ fn ui_render(app: &mut SolveApp, p: &Value) -> Outcome {
 }
 
 /// `app.quit {force?}`: quit, asking about unsaved designs unless forced.
-fn app_quit(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Outcome {
+fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome {
     // `force`: quit without asking about unsaved designs.
-    if p.get("force").and_then(Value::as_bool).unwrap_or(false) {
+    if q.force {
         app.quit_requested = true;
     } else {
         crate::documents::request_quit(app);
@@ -1162,25 +1052,6 @@ fn app_quit(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Outcome {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
     ok(json!({"quitting": app.quit_requested, "asking": app.docs.closing.is_some()}))
-}
-
-/// A request's params as the methods read them.
-#[derive(Clone, Copy)]
-struct Params<'a>(&'a Value);
-
-impl<'a> Params<'a> {
-    /// A string field.
-    fn str(self, k: &str) -> Option<&'a str> {
-        self.0.get(k).and_then(Value::as_str)
-    }
-    /// A finite number field.
-    fn num(self, k: &str) -> Option<f64> {
-        self.0.get(k).and_then(Value::as_f64).filter(|x| x.is_finite())
-    }
-    /// A boolean field, false when absent.
-    fn flag(self, k: &str) -> bool {
-        self.0.get(k).and_then(Value::as_bool).unwrap_or(false)
-    }
 }
 
 /// `ui.camera`: the viewport's orbit camera (`target`, `yaw`, `pitch`, `roll` in radians,
