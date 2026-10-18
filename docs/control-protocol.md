@@ -128,6 +128,15 @@ a hidden folder, the open design's folder (whose hidden files stay out of reach)
 MCP server sends its folders this way on every request ([mcp.md](mcp.md)). Without
 `allow_paths` file paths are not limited: a client holding the token can do what the user can.
 
+### Params
+
+A field may be left out where a method marks it optional (`?`), but a field that is present must
+have the documented type: a wrong type, or `null` for a field with a default (such as `shift` or
+`delta`), is refused with an error naming the field, and nothing runs. Screen points (`x`, `y`)
+must lie within ±1 000 000. In particular, `engine.execute` takes `command` or its alias `id`,
+not both; `ui.help` refuses an item it doesn't know; and `ui.menu` needs both `x` and `y` to open
+a menu (neither describes the open one).
+
 ## Engine
 
 | Method | Params | Result |
