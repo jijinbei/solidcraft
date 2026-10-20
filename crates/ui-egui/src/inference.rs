@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use egui::{Shape, Stroke};
 use serde_json::json;
 use solidcraft_engine::geom::Vec2;
-use solidcraft_engine::sketch::{CurveKind, Sketch};
+use solidcraft_engine::sketch::{CurveIdx, CurveKind, Sketch};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -84,6 +84,7 @@ pub fn tangent(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference>
         if c.construction || !matches!(c.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }) {
             continue;
         }
+        let i = CurveIdx(i);
         let (Some(o), Some(r)) = (sk.center(i), sk.radius(i)) else { continue };
         let d = prev.dist(o);
         if d <= r + 1e-9 {

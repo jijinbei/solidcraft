@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
 use solidcraft_io::{Geom2, MAX_DRAWING_BYTES};
-use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, PointIdx, Sketch};
+use solidcraft_sketch::{CurveIdx, CurveKind, LinkKind, LinkSource, PointIdx, Sketch};
 
 use super::CommandSpec;
 use super::sketch::{edit, ids_of};
@@ -41,7 +41,7 @@ fn source_text(p: &Value, cmd: &str) -> Result<String> {
 /// Add imported geometry to a sketch, sharing end points that meet.
 /// Adds the geometry; end points closer than `q` (mm) become one point, so drawings whose
 /// ends almost meet still make closed profiles.
-fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
+fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<CurveIdx>, Vec<Geom2>)> {
     let mut map: HashMap<(i64, i64), Vec<(Vec2, PointIdx)>> = HashMap::new();
     let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<PointIdx> {
         let p = f(p);
@@ -185,7 +185,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
             CurveKind::Circle { c, r } => geom.push(Geom2::Circle(pt(*c), *r)),
             CurveKind::Arc { c, a, b } => geom.push(Geom2::Arc { c: pt(*c), a: pt(*a), b: pt(*b) }),
             _ => {
-                let poly = sk.polyline(i);
+                let poly = sk.polyline(CurveIdx(i));
                 geom.extend(poly.windows(2).map(|w| Geom2::Line(w[0], w[1])));
             }
         }

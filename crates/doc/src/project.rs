@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use solidcraft_geom::{Mesh, Plane, Seg2, Vec2, Vec3};
-use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{CurveIdx, CurveKind, LinkGeom, LinkKind, LinkSource, Sketch};
 
 use crate::eval::ModelState;
 use crate::expr::Value;
@@ -785,11 +785,11 @@ fn merge_split_circles(geom: Vec<LinkGeom>) -> Vec<LinkGeom> {
 // ---------------------------------------------------------------------------------------------
 // Projection
 
-fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec<LinkGeom> {
+fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: CurveIdx, to: &Plane) -> Vec<LinkGeom> {
     let map = |p: Vec2| to.to_local(from.to_world(p));
     let parallel = from.normal().cross(to.normal()).len() < 1e-9;
     let flip = from.normal().dot(to.normal()) < 0.0;
-    match sk.curves.get(ci).map(|c| &c.kind) {
+    match sk.curve(ci).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => match (sk.point(*a), sk.point(*b)) {
             (Some(a), Some(b)) => {
                 let (a, b) = (map(a), map(b));

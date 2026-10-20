@@ -3545,7 +3545,7 @@ pub(crate) fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef, construct: &dyn Fn
     match axis {
         AxisRef::SketchLine { curve } => {
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
-            match ss.sketch.curves.get(ci).map(|c| &c.kind) {
+            match ss.sketch.curve(ci).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => {
                     let (pa, pb) = (ss.sketch.point(*a).unwrap_or_default(), ss.sketch.point(*b).unwrap_or_default());
                     Ok((pa, pb - pa))
@@ -6499,7 +6499,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
                     let curves: Vec<Vec<solidcraft_geom::Seg2>> = (0..ss.sketch.curves.len())
                         .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
-                        .map(|ci| ss.sketch.segs(ci))
+                        .map(|ci| ss.sketch.segs(solidcraft_sketch::CurveIdx(ci)))
                         .filter(|segs| !segs.is_empty())
                         .collect();
                     if curves.is_empty() {

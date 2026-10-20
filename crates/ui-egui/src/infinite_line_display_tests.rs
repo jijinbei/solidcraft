@@ -61,6 +61,6 @@ fn infinite_mode_draws_infinite_lines() {
     crate::sketch_palette::apply_mode(&mut h.app, "sketch.line", &r);
     let id = r["curves"][0].as_str().unwrap().to_string();
     let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
-    let c = sk.curves.get(sk.curve_index(&id).unwrap()).unwrap();
+    let c = sk.curve(sk.curve_index(&id).unwrap()).unwrap();
     assert!(c.infinite && c.construction, "{c:?}");
 }

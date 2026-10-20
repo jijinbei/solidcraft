@@ -1,6 +1,7 @@
 //! Real keyboard input must stay inside the dimensions of the shape being drawn.
 
 use serde_json::json;
+use solidcraft_engine::sketch::CurveIdx;
 
 use super::{BOX, in_view};
 use crate::scenario::Harness;
@@ -324,11 +325,14 @@ fn a_line_end_on_a_circle_within_the_axis_snap_lands_on_the_quadrant_the_preview
             .curves
             .iter()
             .enumerate()
-            .find_map(|(i, c)| if let CurveKind::Line { a, b } = c.kind { Some((i, a, b)) } else { None })
+            .find_map(|(i, c)| if let CurveKind::Line { a, b } = c.kind { Some((CurveIdx(i), a, b)) } else { None })
             .unwrap_or_else(|| panic!("{deg}: no line, {:?}", h.app.status));
         assert!(sk.point(a).unwrap().dist(Vec2::ZERO) < 1e-9, "{deg}");
         assert!(sk.point(b).unwrap().dist(end) < 1e-9, "{deg}: placed at {:?}", sk.point(b));
-        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c: 0 } if p == b)), "{deg}: end not on the circle");
+        assert!(
+            sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c: CurveIdx(0) } if p == b)),
+            "{deg}: end not on the circle"
+        );
         let axis = |k: &ConstraintKind| {
             if horizontal {
                 matches!(k, ConstraintKind::Horizontal { l } if *l == line)

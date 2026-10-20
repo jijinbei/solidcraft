@@ -2,7 +2,7 @@
 
 use solidcraft_geom::Vec2;
 
-use crate::{Analysis, ConstraintKind, Hold, PointIdx, Sketch, solve_with};
+use crate::{Analysis, ConstraintKind, CurveIdx, Hold, PointIdx, Sketch, solve_with};
 
 fn v(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)
@@ -15,7 +15,7 @@ fn v(x: f64, y: f64) -> Vec2 {
 fn a_point_held_on_a_line_slides_instead_of_swinging_the_line() {
     let mut sk = Sketch::new();
     let c: Vec<PointIdx> = [v(0.0, 0.0), v(40.0, 0.0), v(40.0, 30.0), v(0.0, 30.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-    let sides: Vec<usize> = (0..4).map(|i| sk.add_line_pts(c[i], c[(i + 1) % 4], None).unwrap()).collect();
+    let sides: Vec<CurveIdx> = (0..4).map(|i| sk.add_line_pts(c[i], c[(i + 1) % 4], None).unwrap()).collect();
     let bottom = sk.add_point(v(20.0, 0.0), None).unwrap();
     let top = sk.add_point(v(20.0, 30.0), None).unwrap();
     sk.add_line_pts(bottom, top, None).unwrap();
@@ -39,7 +39,7 @@ fn a_point_held_on_a_line_slides_instead_of_swinging_the_line() {
 fn the_far_corner_stays_when_the_side_a_point_is_held_on_turns() {
     let mut sk = Sketch::new();
     let c: Vec<PointIdx> = [v(0.0, 0.0), v(40.0, 0.0), v(40.0, 30.0), v(0.0, 30.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-    let sides: Vec<usize> = (0..4).map(|i| sk.add_line_pts(c[i], c[(i + 1) % 4], None).unwrap()).collect();
+    let sides: Vec<CurveIdx> = (0..4).map(|i| sk.add_line_pts(c[i], c[(i + 1) % 4], None).unwrap()).collect();
     let bottom = sk.add_point(v(20.0, 0.0), None).unwrap();
     let top = sk.add_point(v(20.0, 30.0), None).unwrap();
     sk.add_line_pts(bottom, top, None).unwrap();

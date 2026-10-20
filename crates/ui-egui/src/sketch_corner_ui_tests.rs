@@ -1,5 +1,5 @@
 use super::*;
-use solidcraft_engine::sketch::{CurveKind, PointIdx};
+use solidcraft_engine::sketch::{CurveIdx, CurveKind, PointIdx};
 
 #[test]
 fn three_point_arc_follows_its_snapped_through_point_after_dimension_change() {
@@ -19,7 +19,7 @@ fn three_point_arc_follows_its_snapped_through_point_after_dimension_change() {
     let state = h.app.session.model.state();
     let ss = state.sketch(sid).unwrap();
     let sk = &ss.sketch;
-    let arc = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Arc { .. })).unwrap();
+    let arc = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Arc { .. })).map(CurveIdx).unwrap();
     let through = sk.point(sk.resolve_point("height.end").unwrap()).unwrap();
     assert!(ss.report.ok());
     assert!(through.dist(Vec2::new(0.0, 15.0)) < 1e-6, "{through:?}");
@@ -672,7 +672,7 @@ fn two_tangent_circle_clicked_on_two_sides_fits_the_corner_and_moves_nothing() {
         h.step(&json!({"click":{"world":[-550,0,0]}})).unwrap();
         h.step(&json!({"click":{"world":[-800,250,0]}})).unwrap();
         let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
-        let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. }));
+        let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).map(CurveIdx);
         let circle = circle.unwrap_or_else(|| panic!("fixed {fixed}: no circle: {:?}", h.app.status));
         assert!(sk.center(circle).unwrap().dist(Vec2::new(-750.0, 50.0)) < 1e-6, "fixed {fixed}: {:?}", sk.center(circle));
         let after = points(&h);

@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Aabb2, Vec2, Vec3};
 
-use crate::model::{Curve, CurveKind, PointIdx, Result, Sketch, SketchError, in_range, radius_in_range};
+use crate::model::{Curve, CurveIdx, CurveKind, PointIdx, Result, Sketch, SketchError, in_range, radius_in_range};
 
 /// Points of one link closer than this are merged into one point.
 const MERGE_TOL: f64 = 1e-7;
@@ -548,8 +548,8 @@ impl Sketch {
     }
 
     /// Curves owned by a link, in creation order.
-    pub fn link_curves(&self, id: &str) -> Vec<usize> {
-        self.curves.iter().enumerate().filter(|(_, c)| c.link.as_deref() == Some(id)).map(|(i, _)| i).collect()
+    pub fn link_curves(&self, id: &str) -> Vec<CurveIdx> {
+        self.curves.iter().enumerate().filter(|(_, c)| c.link.as_deref() == Some(id)).map(|(i, _)| CurveIdx(i)).collect()
     }
 
     /// Points owned by a link, in creation order.
@@ -558,34 +558,34 @@ impl Sketch {
     }
 
     /// Is this curve linked reference geometry?
-    pub fn is_linked_curve(&self, ci: usize) -> bool {
-        self.curves.get(ci).is_some_and(|c| c.link.is_some())
+    pub fn is_linked_curve(&self, ci: CurveIdx) -> bool {
+        self.curve(ci).is_some_and(|c| c.link.is_some())
     }
 
     /// Is this curve text outline (linked, but drawn like normal geometry)?
-    pub fn is_text_curve(&self, ci: usize) -> bool {
-        self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.kind == LinkKind::Text)
+    pub fn is_text_curve(&self, ci: CurveIdx) -> bool {
+        self.curve(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.kind == LinkKind::Text)
     }
 
     /// Is the curve's link lost (its reference no longer found)?
-    pub fn is_lost_curve(&self, ci: usize) -> bool {
-        self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.lost)
+    pub fn is_lost_curve(&self, ci: CurveIdx) -> bool {
+        self.curve(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.lost)
     }
 
     /// The line of sketch axis `name` (`x` or `y`) when the sketch already has one (see
     /// [`Sketch::sketch_axis_line`]).
-    pub fn sketch_axis_curve(&self, name: &str) -> Option<usize> {
+    pub fn sketch_axis_curve(&self, name: &str) -> Option<CurveIdx> {
         self.links
             .iter()
             .filter(|l| matches!(&l.source, LinkSource::SketchAxis { name: n } if n == name))
-            .find_map(|l| self.link_curves(&l.id).into_iter().find(|c| matches!(self.curves.get(*c).map(|c| &c.kind), Some(CurveKind::Line { .. }))))
+            .find_map(|l| self.link_curves(&l.id).into_iter().find(|c| matches!(self.curve(*c).map(|c| &c.kind), Some(CurveKind::Line { .. }))))
     }
 
     /// The line of sketch axis `name` (`x` or `y`) that constraints can refer to: a linked
     /// construction line on the axis (it stays there and is left out of profiles), shared by
     /// every reference to that axis and added on first use. `None` when `name` is not a sketch
     /// axis.
-    pub fn sketch_axis_line(&mut self, name: &str) -> Result<Option<usize>> {
+    pub fn sketch_axis_line(&mut self, name: &str) -> Result<Option<CurveIdx>> {
         let Some(geom) = sketch_axis_geom(name) else { return Ok(None) };
         if let Some(c) = self.sketch_axis_curve(name) {
             return Ok(Some(c));
@@ -593,7 +593,7 @@ impl Sketch {
         let id = self.add_link(LinkKind::Project, LinkSource::SketchAxis { name: name.into() }, &[geom])?;
         let curves = self.link_curves(&id);
         for c in &curves {
-            if let Some(cu) = self.curves.get_mut(*c) {
+            if let Some(cu) = self.curve_mut(*c) {
                 cu.construction = true;
             }
         }
@@ -693,7 +693,7 @@ impl Sketch {
 
         let cur: Option<Vec<LCurve>> = curves
             .iter()
-            .map(|ci| match self.curves.get(*ci).map(|c| &c.kind) {
+            .map(|ci| match self.curve(*ci).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => Some(LCurve::Line(local(*a)?, local(*b)?)),
                 Some(CurveKind::Circle { c, r }) => Some(LCurve::Circle(local(*c)?, *r)),
                 Some(CurveKind::Arc { c, a, b }) => Some(LCurve::Arc(local(*c)?, local(*a)?, local(*b)?)),
@@ -936,17 +936,17 @@ impl Sketch {
                 }
                 for (ci, li) in curves.iter().zip(curve_map) {
                     if let (Some(Curve { kind: CurveKind::Circle { r, .. }, .. }), Some(LCurve::Circle(_, value))) =
-                        (self.curves.get_mut(*ci), lay.curves.get(li))
+                        (self.curve_mut(*ci), lay.curves.get(li))
                     {
                         *r = *value;
                     }
                     if let (Some(Curve { kind: CurveKind::Conic { rho, .. }, .. }), Some(LCurve::Conic(.., value))) =
-                        (self.curves.get_mut(*ci), lay.curves.get(li))
+                        (self.curve_mut(*ci), lay.curves.get(li))
                     {
                         *rho = *value;
                     }
                     if let (Some(Curve { kind: CurveKind::Ellipse { r, .. }, .. }), Some(LCurve::Ellipse(.., value))) =
-                        (self.curves.get_mut(*ci), lay.curves.get(li))
+                        (self.curve_mut(*ci), lay.curves.get(li))
                     {
                         *r = *value;
                     }
@@ -969,13 +969,13 @@ impl Sketch {
                 }
             }
             for (ci, c) in curves.iter().zip(&new) {
-                if let (LCurve::Circle(_, r), Some(Curve { kind: CurveKind::Circle { r: slot, .. }, .. })) = (c, self.curves.get_mut(*ci)) {
+                if let (LCurve::Circle(_, r), Some(Curve { kind: CurveKind::Circle { r: slot, .. }, .. })) = (c, self.curve_mut(*ci)) {
                     *slot = *r;
                 }
-                if let (LCurve::Conic(.., r), Some(Curve { kind: CurveKind::Conic { rho, .. }, .. })) = (c, self.curves.get_mut(*ci)) {
+                if let (LCurve::Conic(.., r), Some(Curve { kind: CurveKind::Conic { rho, .. }, .. })) = (c, self.curve_mut(*ci)) {
                     *rho = *r;
                 }
-                if let (LCurve::Ellipse(.., r), Some(Curve { kind: CurveKind::Ellipse { r: slot, .. }, .. })) = (c, self.curves.get_mut(*ci)) {
+                if let (LCurve::Ellipse(.., r), Some(Curve { kind: CurveKind::Ellipse { r: slot, .. }, .. })) = (c, self.curve_mut(*ci)) {
                     *slot = *r;
                 }
             }

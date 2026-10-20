@@ -1,6 +1,7 @@
 //! Dimension creation is an editable draft, accepted by the real focused value field.
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::sketch::CurveIdx;
 
 fn line(end: [f64; 2]) -> Harness {
     crate::dim_view::cancel();
@@ -622,11 +623,12 @@ fn type_first_line_circle_arc_distance_and_angle_commit_one_undo_step_each() {
         assert_eq!(h.app.session.doc.to_json(), original, "nothing changes until Enter");
         // The text follows the pointer while typing: Enter places it there.
         // (For the angle, inside the wedge both before and after it changes.)
-        let cursor = if check(&solidcraft_engine::sketch::ConstraintKind::Angle { a: 0, b: 1, value: 60f64.to_radians(), flip: false }) {
-            [10.4, 6.0]
-        } else {
-            [centre[0] + 3.0, centre[1] + 9.0]
-        };
+        let cursor =
+            if check(&solidcraft_engine::sketch::ConstraintKind::Angle { a: CurveIdx(0), b: CurveIdx(1), value: 60f64.to_radians(), flip: false }) {
+                [10.4, 6.0]
+            } else {
+                [centre[0] + 3.0, centre[1] + 9.0]
+            };
         h.step(&json!({"move":{"world":[cursor[0],cursor[1],0]}})).unwrap();
         keys(&mut h, typed);
         h.step(&json!({"key":"Enter"})).unwrap();

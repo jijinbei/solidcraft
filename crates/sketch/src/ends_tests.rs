@@ -2,20 +2,20 @@
 
 use solidcraft_geom::Vec2;
 
-use crate::{ConstraintKind, EndTouch, PointIdx, Sketch, find_profiles, loose_ends};
+use crate::{ConstraintKind, CurveIdx, EndTouch, PointIdx, Sketch, find_profiles, loose_ends};
 
 fn v(x: f64, y: f64) -> Vec2 {
     Vec2::new(x, y)
 }
 
 /// A closed polyline whose corners are each one shared point.
-fn shared_square(sk: &mut Sketch) -> Vec<usize> {
+fn shared_square(sk: &mut Sketch) -> Vec<CurveIdx> {
     let pts: Vec<PointIdx> = [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
     (0..4).map(|i| sk.add_line_pts(pts[i], pts[(i + 1) % 4], None).unwrap()).collect()
 }
 
 /// A square drawn as four separate lines: every corner is two points at one place.
-fn loose_square(sk: &mut Sketch) -> Vec<usize> {
+fn loose_square(sk: &mut Sketch) -> Vec<CurveIdx> {
     let c = [v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)];
     (0..4).map(|i| sk.add_line(c[i], c[(i + 1) % 4], None, None, None).unwrap()).collect()
 }

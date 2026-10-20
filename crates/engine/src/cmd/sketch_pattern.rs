@@ -57,7 +57,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         ps.dedup();
         let entity_ids: Vec<String> = cs
             .iter()
-            .filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone()))
+            .filter_map(|i| sk.curve(*i).map(|c| c.id.clone()))
             .chain(ps.iter().filter_map(|i| sk.spoint(*i).map(|p| p.id.clone())))
             .collect();
         if let Some(old) = &old {
@@ -235,7 +235,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                     cons.push(add_c(sk, ConstraintKind::PatternPoint { p: *p, q: *q, center, angle, offset: base_offset, directions })?);
                 }
                 for (a, b) in cs.iter().zip(&made) {
-                    if matches!(sk.curves.get(*a).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. })) {
+                    if matches!(sk.curve(*a).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. })) {
                         cons.push(add_c(sk, ConstraintKind::PatternRadius { a: *a, b: *b })?);
                     }
                 }
@@ -281,7 +281,7 @@ fn line_direction(sk: &Sketch, id: Option<&str>) -> Option<Vec2> {
 
 /// Keep sampled vector directions compatible with older designs, while picked lines are
 /// solver references. The default second direction follows the first line's perpendicular.
-fn linear_displacement(sk: &Sketch, kind: &SketchPatternKind, [i, j]: [usize; 2], fallback: Vec2) -> (Vec2, [Option<(usize, Vec2)>; 2]) {
+fn linear_displacement(sk: &Sketch, kind: &SketchPatternKind, [i, j]: [usize; 2], fallback: Vec2) -> (Vec2, [Option<(CurveIdx, Vec2)>; 2]) {
     let SketchPatternKind::Rectangular { dir, dir2, direction, direction2, spacing, spacing2, alignment, alignment2, reversed, reversed2, .. } = kind
     else {
         return (fallback, [None; 2]);

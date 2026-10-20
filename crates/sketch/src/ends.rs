@@ -11,7 +11,7 @@
 
 use solidcraft_geom::{Aabb2, Seg2, Vec2};
 
-use crate::model::{ConstraintKind, CurveKind, PointIdx, Sketch};
+use crate::model::{ConstraintKind, CurveIdx, CurveKind, PointIdx, Sketch};
 use crate::union_find::{find, union};
 
 /// How close an end has to be to another curve to touch it: the distance at which profile
@@ -27,7 +27,7 @@ pub enum EndTouch {
     /// Another curve's end.
     Point(PointIdx),
     /// Another curve, between its ends (a curve index).
-    Curve(usize),
+    Curve(CurveIdx),
 }
 
 /// An end that touches another curve without being tied to it.
@@ -36,7 +36,7 @@ pub struct UntiedEnd {
     /// The end's point.
     pub point: PointIdx,
     /// The curve it is an end of.
-    pub curve: usize,
+    pub curve: CurveIdx,
     pub touches: EndTouch,
 }
 
@@ -54,8 +54,8 @@ impl EndReport {
 }
 
 /// Curves profiles are made of (the ones `find_profiles` reads).
-fn profile_curve(sk: &Sketch, ci: usize) -> bool {
-    sk.curves.get(ci).is_some_and(|c| !(c.construction || c.centerline || c.infinite))
+fn profile_curve(sk: &Sketch, ci: CurveIdx) -> bool {
+    sk.curve(ci).is_some_and(|c| !(c.construction || c.centerline || c.infinite))
 }
 
 /// A box around a segment (conservative for curved ones).
@@ -85,8 +85,9 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
     // on a profile curve.
     let mut ends_at = vec![0usize; n];
     let mut held = vec![false; n];
-    let mut ends: Vec<(PointIdx, usize)> = Vec::new();
+    let mut ends: Vec<(PointIdx, CurveIdx)> = Vec::new();
     for (ci, c) in sk.curves.iter().enumerate() {
+        let ci = CurveIdx(ci);
         if !profile_curve(sk, ci) {
             continue;
         }
@@ -122,7 +123,7 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
         return EndReport::default();
     }
     // Ends tied to nothing: the ones to look at by position.
-    let mut free: Vec<(PointIdx, usize, Vec2)> = Vec::new();
+    let mut free: Vec<(PointIdx, CurveIdx, Vec2)> = Vec::new();
     for &(p, ci) in &ends {
         let g = find(&mut group, p.0);
         if ends_at.get(g).copied().unwrap_or(0) >= 2 || held.get(g).copied().unwrap_or(false) {
@@ -139,6 +140,7 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
     // What each free end touches: another curve's end first, else another curve's span.
     let mut touch: Vec<Option<EndTouch>> = vec![None; free.len()];
     for (ci, c) in sk.curves.iter().enumerate() {
+        let ci = CurveIdx(ci);
         if !profile_curve(sk, ci) {
             continue;
         }

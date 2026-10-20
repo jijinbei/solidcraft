@@ -10,6 +10,7 @@ use std::cell::{Cell, RefCell};
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcraft_engine::sketch::CurveIdx;
 
 use crate::SolveApp;
 use crate::tool_modifiers::{Audit, Binding, Match, ModAction, ModifierCombo, Scope, ToolModifiers, Trigger};
@@ -390,6 +391,7 @@ pub fn refine_snap(
     let mut best: Option<(f64, &'static str, Vec2)> = None;
     let mut mid_of: Option<String> = None;
     for (i, c) in sk.curves.iter().enumerate() {
+        let i = CurveIdx(i);
         if let solidcraft_engine::sketch::CurveKind::Line { .. } = c.kind
             && let Some(solidcraft_engine::sketch::Shape::Line { a, b }) = sk.shape(i)
         {
@@ -434,7 +436,7 @@ pub fn refine_snap(
     // On a curve (coincident with it).
     if !mid_only && best.is_none() {
         for (i, c) in sk.curves.iter().enumerate() {
-            let Some(sh) = sk.shape(i) else { continue };
+            let Some(sh) = sk.shape(CurveIdx(i)) else { continue };
             let d = sh.dist(lp);
             if d < tol * 0.8 && best.is_none_or(|x| d < x.0) {
                 let q = sh.project(lp);
@@ -695,10 +697,14 @@ pub(crate) fn corner_curves(
     sk: &solidcraft_engine::sketch::Sketch,
     pi: solidcraft_engine::sketch::PointIdx,
     arcs_ok: bool,
-) -> Option<(usize, usize)> {
+) -> Option<(CurveIdx, CurveIdx)> {
     use solidcraft_engine::sketch::CurveKind;
-    let candidates =
-        sk.curves.iter().enumerate().filter(|(ci, c)| !sk.is_linked_curve(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
+    let candidates = sk
+        .curves
+        .iter()
+        .enumerate()
+        .map(|(ci, c)| (CurveIdx(ci), c))
+        .filter(|(ci, c)| !sk.is_linked_curve(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
     let mut curves: Vec<_> = candidates.clone().take(3).collect();
     // Center rectangles have construction diagonals at their corners. Match the engine's
     // corner selection: when more than two curves meet, use the profile sides.
@@ -1379,7 +1385,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
 }
 
 /// The curves and points a constraint ties together.
-fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<usize>, Vec<solidcraft_engine::sketch::PointIdx>) {
+fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<CurveIdx>, Vec<solidcraft_engine::sketch::PointIdx>) {
     use solidcraft_engine::sketch::ConstraintKind::*;
     match *k {
         Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![], vec![p, q]),
@@ -1408,7 +1414,7 @@ fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<us
 fn glyph_anchors(sk: &solidcraft_engine::sketch::Sketch, k: &solidcraft_engine::sketch::ConstraintKind) -> Vec<(Vec2, Option<Vec2>)> {
     use solidcraft_engine::sketch::ConstraintKind::*;
     // Half way along the curve, and the direction there.
-    let mid = |c: usize| -> Option<(Vec2, Option<Vec2>)> {
+    let mid = |c: CurveIdx| -> Option<(Vec2, Option<Vec2>)> {
         let poly = sk.polyline(c);
         let total: f64 = poly.windows(2).map(|w| w[0].dist(w[1])).sum();
         let mut acc = 0.0;

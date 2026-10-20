@@ -53,7 +53,7 @@ impl Colors {
 
 pub struct SketchPreview {
     pub sketch: std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
-    pub curves: Vec<usize>,
+    pub curves: Vec<solidcraft_engine::sketch::CurveIdx>,
     pub points: Vec<solidcraft_engine::sketch::PointIdx>,
 }
 
@@ -664,7 +664,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
                 .enumerate()
                 .filter_map(|(index, curve)| {
                     let unchanged = old_curves.contains(curve.id.as_str());
-                    if unchanged { None } else { Some(index) }
+                    if unchanged { None } else { Some(solidcraft_engine::sketch::CurveIdx(index)) }
                 })
                 .collect::<Vec<_>>();
             let points = sketch

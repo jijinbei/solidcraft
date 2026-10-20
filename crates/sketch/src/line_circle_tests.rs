@@ -9,7 +9,7 @@ use crate::*;
 
 /// A fixed line along x from (0, 0) to (40, 0) and a circle of radius `r` at `centre` (its
 /// centre free, its radius set by a dimension). The line, the circle and the centre point.
-fn line_and_circle(centre: Vec2, r: f64) -> (Sketch, usize, usize, PointIdx) {
+fn line_and_circle(centre: Vec2, r: f64) -> (Sketch, CurveIdx, CurveIdx, PointIdx) {
     let mut sk = Sketch::new();
     let l = sk.add_line(v(0.0, 0.0), v(40.0, 0.0), None, None, None).unwrap();
     let (a, b) = sk.curves[l].kind.ends().unwrap();
@@ -112,8 +112,8 @@ fn the_dimension_survives_a_round_trip_and_a_renumbering() {
     let outside = ConstraintKind::LineCircleDistance { l, c, value: 2.0, inside: false };
     assert!(serde_json::to_value(&outside).unwrap().get("inside").is_none());
     let mut k = outside;
-    assert!(k.remap(&|p| Some(p), &|i| Some(i + 10)));
-    assert_eq!(k.indices(), (vec![], vec![l + 10, c + 10]));
+    assert!(k.remap(&|p| Some(p), &|i| Some(CurveIdx(i.0 + 10))));
+    assert_eq!(k.indices(), (vec![], vec![CurveIdx(l.0 + 10), CurveIdx(c.0 + 10)]));
     assert!(!k.remap(&|p| Some(p), &|_| None));
 }
 

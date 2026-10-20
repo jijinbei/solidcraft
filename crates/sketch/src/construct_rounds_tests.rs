@@ -23,7 +23,7 @@ enum Check {
     /// `p` stays ahead of or behind `a` along the line from `a` to `b`.
     Along { p: PointIdx, a: PointIdx, b: PointIdx },
     /// The counter-clockwise sweep of the arc `curve` stays in `lo..hi` (radians).
-    Sweep { curve: usize, lo: f64, hi: f64 },
+    Sweep { curve: CurveIdx, lo: f64, hi: f64 },
     /// `p` ends at `at`.
     At { p: PointIdx, at: Vec2 },
 }
@@ -36,7 +36,7 @@ struct Case {
     checks: Vec<Check>,
 }
 
-fn sweep(sk: &Sketch, curve: usize) -> f64 {
+fn sweep(sk: &Sketch, curve: CurveIdx) -> f64 {
     let CurveKind::Arc { c, a, b } = sk.curves[curve].kind else { return f64::NAN };
     let (c, a, b) = (sk.points[c].pos, sk.points[a].pos, sk.points[b].pos);
     ((b - c).angle() - (a - c).angle()).rem_euclid(std::f64::consts::TAU)
@@ -99,7 +99,7 @@ fn filleted_rectangle(rnd: &mut Lcg, lo: f64, hi: f64) -> Option<Case> {
     let right = sk.add_line(at(w, r[0]), at(w, h - r[1]), None, None, None).unwrap();
     let top = sk.add_line(at(w - r[1], h), at(r[2], h), None, None, None).unwrap();
     let left = sk.add_line(at(0.0, h - r[2]), at(0.0, r[3]), None, None, None).unwrap();
-    let ends = |sk: &Sketch, l: usize| sk.curves[l].kind.ends().unwrap();
+    let ends = |sk: &Sketch, l: CurveIdx| sk.curves[l].kind.ends().unwrap();
     let ((b0, b1), (r0, r1), (t0, t1), (l0, l1)) = (ends(&sk, bottom), ends(&sk, right), ends(&sk, top), ends(&sk, left));
     let corners = [
         (at(w - r[0], r[0]), b1, r0, bottom, right),
@@ -164,7 +164,7 @@ fn slot(rnd: &mut Lcg, lo: f64, hi: f64, overall: bool) -> Option<Case> {
     let (tb, ta) = sk.curves[top].kind.ends().unwrap();
     let arc_b = sk.add_arc(cb, cb - n * r, cb + n * r, [None, Some(bb), Some(tb)], None).unwrap();
     let arc_a = sk.add_arc(ca, ca + n * r, ca - n * r, [None, Some(ta), Some(ba)], None).unwrap();
-    let centre = |sk: &Sketch, a: usize| match sk.curves[a].kind {
+    let centre = |sk: &Sketch, a: CurveIdx| match sk.curves[a].kind {
         CurveKind::Arc { c, .. } => c,
         _ => panic!(),
     };
@@ -655,7 +655,7 @@ fn a_dimensioned_radius_is_seeded() {
     let sk = edited(&case);
     let s = seed_of(&sk);
     let ConstraintKind::Diameter { c, value } = sk.constraints[1].kind else { panic!() };
-    assert_eq!(s.radius[c], Some(value / 2.0));
+    assert_eq!(s.radius[c.0], Some(value / 2.0));
 }
 
 /// Hostile curve references and values in the constraints the new loci read neither panic
@@ -667,25 +667,25 @@ fn hostile_lines_and_rounds_neither_panic_nor_change_the_report() {
         sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, text: None })
     };
     let cases: Vec<Box<dyn Fn(&mut Sketch)>> = vec![
-        Box::new(|sk| raw(sk, ConstraintKind::Midpoint { p: PointIdx(1), l: 999 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Midpoint { p: PointIdx(usize::MAX), l: 0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Symmetric { p: PointIdx(1), q: PointIdx(2), l: usize::MAX })),
-        Box::new(|sk| raw(sk, ConstraintKind::Tangent { a: 0, b: 0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Tangent { a: 2, b: 77 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Radius { c: 2, value: f64::NAN })),
-        Box::new(|sk| raw(sk, ConstraintKind::Radius { c: 2, value: -3.0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Diameter { c: 0, value: 1e300 })),
-        Box::new(|sk| raw(sk, ConstraintKind::PointOnCurve { p: PointIdx(1), c: 2 })),
-        Box::new(|sk| raw(sk, ConstraintKind::PointOnCurve { p: PointIdx(1), c: usize::MAX })),
-        Box::new(|sk| raw(sk, ConstraintKind::PointLineDistance { p: PointIdx(1), l: 1, value: f64::INFINITY })),
-        Box::new(|sk| raw(sk, ConstraintKind::LineAngle { l: 0, value: f64::NAN })),
-        Box::new(|sk| raw(sk, ConstraintKind::Angle { a: 0, b: 1, value: 1e300, flip: true })),
-        Box::new(|sk| raw(sk, ConstraintKind::Parallel { a: 0, b: 0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Perpendicular { a: 0, b: 2 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Equal { a: 0, b: 2 })),
-        Box::new(|sk| raw(sk, ConstraintKind::Concentric { a: 2, b: 2 })),
-        Box::new(|sk| raw(sk, ConstraintKind::SlotOverallLength { a: 2, b: 2, value: 5.0 })),
-        Box::new(|sk| raw(sk, ConstraintKind::LinearDiameter { p: PointIdx(3), l: 0, value: -1.0 })),
+        Box::new(|sk| raw(sk, ConstraintKind::Midpoint { p: PointIdx(1), l: CurveIdx(999) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Midpoint { p: PointIdx(usize::MAX), l: CurveIdx(0) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Symmetric { p: PointIdx(1), q: PointIdx(2), l: CurveIdx(usize::MAX) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Tangent { a: CurveIdx(0), b: CurveIdx(0) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Tangent { a: CurveIdx(2), b: CurveIdx(77) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Radius { c: CurveIdx(2), value: f64::NAN })),
+        Box::new(|sk| raw(sk, ConstraintKind::Radius { c: CurveIdx(2), value: -3.0 })),
+        Box::new(|sk| raw(sk, ConstraintKind::Diameter { c: CurveIdx(0), value: 1e300 })),
+        Box::new(|sk| raw(sk, ConstraintKind::PointOnCurve { p: PointIdx(1), c: CurveIdx(2) })),
+        Box::new(|sk| raw(sk, ConstraintKind::PointOnCurve { p: PointIdx(1), c: CurveIdx(usize::MAX) })),
+        Box::new(|sk| raw(sk, ConstraintKind::PointLineDistance { p: PointIdx(1), l: CurveIdx(1), value: f64::INFINITY })),
+        Box::new(|sk| raw(sk, ConstraintKind::LineAngle { l: CurveIdx(0), value: f64::NAN })),
+        Box::new(|sk| raw(sk, ConstraintKind::Angle { a: CurveIdx(0), b: CurveIdx(1), value: 1e300, flip: true })),
+        Box::new(|sk| raw(sk, ConstraintKind::Parallel { a: CurveIdx(0), b: CurveIdx(0) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Perpendicular { a: CurveIdx(0), b: CurveIdx(2) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Equal { a: CurveIdx(0), b: CurveIdx(2) })),
+        Box::new(|sk| raw(sk, ConstraintKind::Concentric { a: CurveIdx(2), b: CurveIdx(2) })),
+        Box::new(|sk| raw(sk, ConstraintKind::SlotOverallLength { a: CurveIdx(2), b: CurveIdx(2), value: 5.0 })),
+        Box::new(|sk| raw(sk, ConstraintKind::LinearDiameter { p: PointIdx(3), l: CurveIdx(0), value: -1.0 })),
         Box::new(|sk| sk.points[2].pos = v(f64::NAN, 0.0)),
         Box::new(|sk| sk.points[3].pos = v(1e300, -1e300)),
     ];
@@ -752,7 +752,7 @@ fn a_dimensioned_radius_is_seeded_with_nothing_given() {
     let circle = sk.add_circle(v(10.0, 5.0), 10.0, None, None).unwrap();
     push(&mut sk, ConstraintKind::Diameter { c: circle, value: 30.0 });
     let s = seed(&sk, &vec![false; sk.points.len()], None, true, &[], &mut Budget::full());
-    assert_eq!(s.radius[circle], Some(15.0));
+    assert_eq!(s.radius[circle.0], Some(15.0));
 }
 
 /// A line's end constrained onto a circle is the tangency's touch point only through the

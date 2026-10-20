@@ -679,7 +679,7 @@ pub(crate) fn paint_preview_curve(
         curve.construction |= mode != 0 && !curve.centerline;
     }
     let mut budget = solidcraft_engine::render::SamplingBudget::new(4096, 65_536);
-    for index in 0..sketch.curves.len() {
+    for index in (0..sketch.curves.len()).map(solidcraft_engine::sketch::CurveIdx) {
         paint_curve(&sketch, index, plane, painter, proj, stroke, &mut budget);
     }
     crate::scenario::publish_count("tool_preview_curves", sketch.curves.len() as f64);
@@ -703,7 +703,7 @@ pub(crate) fn paint_sketch_path(points: &[solidcraft_engine::geom::Vec3], mode: 
 
 pub(crate) fn paint_curve(
     sketch: &solidcraft_engine::sketch::Sketch,
-    index: usize,
+    index: solidcraft_engine::sketch::CurveIdx,
     plane: &solidcraft_engine::geom::Plane,
     painter: &egui::Painter,
     proj: &Proj,
@@ -711,7 +711,7 @@ pub(crate) fn paint_curve(
     budget: &mut solidcraft_engine::render::SamplingBudget,
 ) {
     for part in crate::sketch_display::curve_with_budget(sketch, index, plane, proj, painter.ctx().pixels_per_point(), budget).parts {
-        let mode = sketch.curves.get(index).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
+        let mode = sketch.curve(index).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
         paint_sketch_path(&part, mode, painter, proj, stroke);
     }
 }
@@ -820,7 +820,7 @@ pub(crate) fn preview_curve(
             sk.add_arc(at(t1, radius), at(t1, radius + half), at(t1, radius - half), [None; 3], None).ok()?;
             sk.add_arc(at(t0, radius), at(t0, radius - half), at(t0, radius + half), [None; 3], None).ok()?;
             let guide = sk.add_arc(centre, at(t0, radius), at(t1, radius), [None; 3], None).ok()?;
-            sk.curves.get_mut(guide)?.construction = true;
+            sk.curve_mut(guide)?.construction = true;
         }
         ("sketch.ellipse", [c, m]) => {
             let u = (*m - *c).normalized()?;

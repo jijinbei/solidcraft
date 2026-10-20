@@ -381,8 +381,7 @@ impl Sketch {
             None => None,
             Some(id) => {
                 let ci = self.curve_index(id).ok_or_else(|| SketchError::Invalid(format!("the text's path `{id}` is not a curve of this sketch")))?;
-                let of_text =
-                    self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.kind == LinkKind::Text);
+                let of_text = self.curve(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.kind == LinkKind::Text);
                 if of_text {
                     return Err(SketchError::Invalid("a text cannot follow the outline of a text".into()));
                 }

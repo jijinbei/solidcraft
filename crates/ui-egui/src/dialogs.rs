@@ -4067,7 +4067,7 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
             let st = app.session.world_state();
             let sid = curves_sketch(app, std::slice::from_ref(id), None)?;
             let ss = st.sketch(sid)?;
-            let c = ss.sketch.curves.get(ss.sketch.curve_index(id)?)?;
+            let c = ss.sketch.curve(ss.sketch.curve_index(id)?)?;
             let solidcraft_engine::sketch::CurveKind::Line { a, b } = c.kind else { return None };
             let (pa, pb) = (ss.plane.to_world(ss.sketch.point(a)?), ss.plane.to_world(ss.sketch.point(b)?));
             Some((pa, (pb - pa).normalized()?))

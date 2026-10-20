@@ -6,7 +6,7 @@
 //! solver alone mirrors a rigid sub-triangle on each family, and what the decomposition does.
 use super::*;
 use crate::construct::switch;
-use crate::model::{Constraint, ConstraintKind, CurveKind, PointIdx, Sketch};
+use crate::model::{Constraint, ConstraintKind, CurveIdx, CurveKind, PointIdx, Sketch};
 use crate::solver::{SolveReport, solve};
 
 use crate::tests::Lcg;
@@ -313,7 +313,7 @@ fn sample(rng: &mut Lcg, make: &mut dyn FnMut(&mut Lcg) -> Option<Case>) -> Case
 /// points: circle, horizontal or vertical line), as the propagation seed does it.
 fn propagation_places_all(sk: &Sketch) -> bool {
     let mut placed = sk.locked_points();
-    let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
+    let ends = |l: CurveIdx| match sk.curve(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => Some((*a, *b)),
         _ => None,
     };
@@ -919,8 +919,8 @@ fn hostile_input_never_panics() {
         ConstraintKind::Distance { p, q: r, value: f64::INFINITY },
         ConstraintKind::Distance { p: q, q: r, value: -3.0 },
         ConstraintKind::Distance { p, q: p, value: 2.0 },
-        ConstraintKind::Length { l: 77, value: 1.0 },
-        ConstraintKind::Horizontal { l: 3 },
+        ConstraintKind::Length { l: CurveIdx(77), value: 1.0 },
+        ConstraintKind::Horizontal { l: CurveIdx(3) },
         ConstraintKind::DistanceX { p, q, value: 1e300 },
         ConstraintKind::DistanceY { p, q, value: 1e300 },
         ConstraintKind::Coincident { p: PointIdx(999), q: p },

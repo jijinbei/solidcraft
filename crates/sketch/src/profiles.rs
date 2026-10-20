@@ -12,7 +12,7 @@ use std::f64::consts::TAU;
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Loop2, Region2, Ring, Seg2, Vec2};
 
-use crate::model::{CurveKind, Sketch};
+use crate::model::{CurveIdx, CurveKind, Sketch};
 use crate::shape::{Shape, intersections_within};
 use crate::union_find::{find, union};
 
@@ -473,7 +473,7 @@ pub fn find_drawn_profiles(sk: &Sketch) -> Vec<Profile> {
     }
     let mut d = sk.clone();
     for (ci, c) in d.curves.iter_mut().enumerate() {
-        if c.link.is_some() && !sk.is_text_curve(ci) {
+        if c.link.is_some() && !sk.is_text_curve(CurveIdx(ci)) {
             c.construction = true;
         }
     }
@@ -488,7 +488,9 @@ pub fn without_text_counters(sk: &Sketch, profiles: Vec<Profile>) -> Vec<Profile
     let index: std::collections::HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
     let text_only: Vec<bool> = profiles
         .iter()
-        .map(|p| !p.outer_curves.is_empty() && p.outer_curves.iter().all(|id| index.get(id.as_str()).is_some_and(|ci| sk.is_text_curve(*ci))))
+        .map(|p| {
+            !p.outer_curves.is_empty() && p.outer_curves.iter().all(|id| index.get(id.as_str()).is_some_and(|ci| sk.is_text_curve(CurveIdx(*ci))))
+        })
         .collect();
     if !text_only.iter().any(|t| *t) {
         return profiles;
@@ -557,13 +559,13 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
                 }
             }
             CurveKind::Arc { .. } => {
-                if let Some(Seg2::Arc { center, radius, start, sweep }) = sk.segs(ci).into_iter().next() {
+                if let Some(Seg2::Arc { center, radius, start, sweep }) = sk.segs(CurveIdx(ci)).into_iter().next() {
                     shapes.push((ci, Shape::Round { c: center, r: radius, start, sweep }));
                 }
             }
             // Free-form curves take part as polylines of their exact segments; loops that use
             // a whole segment get the exact one back.
-            _ => match sk.exact_segs(ci) {
+            _ => match sk.exact_segs(CurveIdx(ci)) {
                 Some(ex) => {
                     let mut spans = Vec::with_capacity(ex.len());
                     for (k, seg) in ex.iter().enumerate() {
@@ -582,7 +584,7 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
                     exact.insert(ci, ex);
                 }
                 None => {
-                    for s in sk.segs(ci) {
+                    for s in sk.segs(CurveIdx(ci)) {
                         if let Seg2::Line { a, b } = s {
                             shapes.push((ci, Shape::Line { a, b }));
                         }

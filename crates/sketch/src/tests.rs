@@ -43,7 +43,7 @@ pub(crate) fn seed_of(sk: &Sketch) -> crate::construct::Seed {
 }
 
 /// Rough rectangle from four lines sharing corner points.
-fn rect(sk: &mut Sketch, p: [Vec2; 4]) -> [usize; 4] {
+fn rect(sk: &mut Sketch, p: [Vec2; 4]) -> [CurveIdx; 4] {
     let a = sk.add_point(p[0], None).unwrap();
     let b = sk.add_point(p[1], None).unwrap();
     let c = sk.add_point(p[2], None).unwrap();
@@ -56,7 +56,7 @@ fn rect(sk: &mut Sketch, p: [Vec2; 4]) -> [usize; 4] {
     ]
 }
 
-fn line_pts(sk: &Sketch, l: usize) -> (Vec2, Vec2) {
+fn line_pts(sk: &Sketch, l: CurveIdx) -> (Vec2, Vec2) {
     match sk.curves[l].kind {
         CurveKind::Line { a, b } => (sk.points[a].pos, sk.points[b].pos),
         _ => panic!(),
@@ -296,7 +296,7 @@ fn hostile_values_rejected() {
     assert!(sk.add_point(v(f64::NAN, 0.0), None).is_err());
     assert!(sk.add_circle(v(0.0, 0.0), -1.0, None, None).is_err());
     assert!(sk.add_circle(v(0.0, 0.0), f64::INFINITY, None, None).is_err());
-    assert!(sk.add_constraint(ConstraintKind::Horizontal { l: 99 }, None).is_err());
+    assert!(sk.add_constraint(ConstraintKind::Horizontal { l: CurveIdx(99) }, None).is_err());
     let c = sk.add_circle(v(0.0, 0.0), 1.0, None, None).unwrap();
     assert!(sk.add_constraint(ConstraintKind::Horizontal { l: c }, None).is_err());
     assert!(sk.add_constraint(ConstraintKind::Radius { c, value: f64::NAN }, None).is_err());
@@ -406,14 +406,14 @@ fn solver_tangencies_split_profiles() {
 }
 
 /// Sorted curve ids.
-fn id_set(sk: &Sketch, curves: &[usize]) -> Vec<String> {
+fn id_set(sk: &Sketch, curves: &[CurveIdx]) -> Vec<String> {
     let mut ids: Vec<String> = curves.iter().map(|c| sk.curves[*c].id.clone()).collect();
     ids.sort();
     ids
 }
 
 /// A projected line of `a`–`b` in `sk`.
-fn reference_line(sk: &mut Sketch, a: Vec2, b: Vec2) -> usize {
+fn reference_line(sk: &mut Sketch, a: Vec2, b: Vec2) -> CurveIdx {
     let link = sk.add_link(LinkKind::Project, LinkSource::SketchCurve { sketch: 1, curve: "edge".into() }, &[LinkGeom::Line(a, b)]).unwrap();
     sk.link_curves(&link)[0]
 }
@@ -786,13 +786,13 @@ fn links_update_in_place_rebuild_and_break() {
     // Linked circles keep their radius in the solver.
     let c = sk.link_curves(&j)[0];
     let rep = solve(&mut sk);
-    assert!(rep.curve_determined[c], "{rep:?}");
+    assert!(rep.curve_determined[c.0], "{rep:?}");
     // Breaking the link frees it.
     sk.break_link(&j).unwrap();
     assert!(sk.links.is_empty());
     assert!(sk.curves[c].link.is_none());
     let rep = solve(&mut sk);
-    assert!(!rep.curve_determined[c]);
+    assert!(!rep.curve_determined[c.0]);
     // Deleting all of a link's curves removes the link.
     let j2 = sk.add_link(LinkKind::Project, LinkSource::Origin, &[LinkGeom::Line(v(0.0, 0.0), v(1.0, 0.0))]).unwrap();
     let cs = sk.link_curves(&j2);
@@ -996,7 +996,7 @@ fn profiles_line_passing_next_to_a_junction_splits_the_loop() {
     let mut sk = Sketch::new();
     let right = sk.add_arc(o, v(0.0, -1.0), v(0.0, 1.0), [None; 3], None).unwrap();
     let left = sk.add_arc(v(-5.0, 0.0), v(-5.0, 1.0), v(-5.0, -1.0), [None; 3], None).unwrap();
-    let ends = |i: usize| match sk.curves[i].kind {
+    let ends = |i: CurveIdx| match sk.curves[i].kind {
         CurveKind::Arc { a, b, .. } => (a, b),
         _ => panic!("an arc"),
     };

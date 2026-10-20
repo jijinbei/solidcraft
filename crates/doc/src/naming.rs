@@ -690,7 +690,7 @@ fn nearest_curve_dist(ss: &crate::SolvedSketch, q: Vec2) -> Option<(f64, String)
         if c.construction {
             continue;
         }
-        for s in ss.sketch.segs(ci) {
+        for s in ss.sketch.segs(solidcraft_sketch::CurveIdx(ci)) {
             let d = seg_dist(&s, q);
             if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
                 best = Some((d, c.id.clone()));
@@ -707,7 +707,7 @@ fn nearest_curve(ss: &crate::SolvedSketch, q: Vec2) -> Option<String> {
         if c.construction {
             continue;
         }
-        for s in ss.sketch.segs(ci) {
+        for s in ss.sketch.segs(solidcraft_sketch::CurveIdx(ci)) {
             let d = seg_dist(&s, q);
             if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
                 best = Some((d, c.id.clone()));

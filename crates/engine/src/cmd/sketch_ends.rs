@@ -2,7 +2,7 @@
 //! touch another curve only by position (untied), and tying the untied ones.
 
 use serde_json::{Value, json};
-use solidcraft_sketch::{ConstraintKind, EndReport, EndTouch, PointIdx, Sketch, loose_ends};
+use solidcraft_sketch::{ConstraintKind, CurveIdx, EndReport, EndTouch, PointIdx, Sketch, loose_ends};
 
 use super::sketch::{add_c, edit, target_sketch};
 use super::{CommandSpec, in_sketch};
@@ -22,8 +22,8 @@ fn point_id(sk: &Sketch, i: PointIdx) -> Value {
     sk.spoint(i).map_or(Value::Null, |p| json!(p.id))
 }
 
-fn curve_id(sk: &Sketch, i: usize) -> Value {
-    sk.curves.get(i).map_or(Value::Null, |c| json!(c.id))
+fn curve_id(sk: &Sketch, i: CurveIdx) -> Value {
+    sk.curve(i).map_or(Value::Null, |c| json!(c.id))
 }
 
 fn at(sk: &Sketch, i: PointIdx) -> Value {
@@ -33,7 +33,7 @@ fn at(sk: &Sketch, i: PointIdx) -> Value {
 /// The point that is an end of curve `c` (for `curve` in the report).
 fn end_curve(sk: &Sketch, p: PointIdx) -> Value {
     let c = sk.curves.iter().position(|c| c.kind.ends().is_some_and(|(a, b)| a == p || b == p) && !(c.construction || c.centerline || c.infinite));
-    c.map_or(Value::Null, |c| curve_id(sk, c))
+    c.map_or(Value::Null, |c| curve_id(sk, CurveIdx(c)))
 }
 
 fn report_json(sk: &Sketch, r: &EndReport) -> Value {

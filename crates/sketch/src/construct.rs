@@ -44,7 +44,7 @@ use solidcraft_geom::Vec2;
 
 use crate::decompose::{Budget, Decomposition, enqueue};
 use crate::loci::{MAX_LOCI, Reading, Rel, View, place, radii, read};
-use crate::model::{PointIdx, Sketch, in_range};
+use crate::model::{CurveIdx, PointIdx, Sketch, in_range};
 
 /// Rounds of decomposition then propagation per seed. Each round after the first must follow a
 /// propagation that placed something, so on real sketches the loop ends after a few; this
@@ -105,7 +105,7 @@ pub(crate) fn seed(
     given: &[bool],
     reference: Option<&[Vec2]>,
     edits: bool,
-    on_curve: &[(PointIdx, usize)],
+    on_curve: &[(PointIdx, CurveIdx)],
     budget: &mut Budget,
 ) -> Seed {
     let n = sk.points.len();

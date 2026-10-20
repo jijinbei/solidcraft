@@ -1,13 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
-use crate::{Constraint, ConstraintKind, CurveKind, PointIdx, Sketch};
+use crate::{Constraint, ConstraintKind, CurveIdx, CurveKind, PointIdx, Sketch};
 use solidcraft_geom::Vec2;
 
 fn point(sk: &mut Sketch, x: f64, y: f64) -> PointIdx {
     sk.add_point(Vec2::new(x, y), None).unwrap()
 }
 
-fn on(sk: &mut Sketch, p: PointIdx, c: usize) {
+fn on(sk: &mut Sketch, p: PointIdx, c: CurveIdx) {
     sk.add_constraint(ConstraintKind::PointOnCurve { p, c }, None).unwrap();
 }
 
@@ -58,7 +58,7 @@ fn curve_centres_and_spline_interior_points_are_used_and_invalid_incidence_is_sa
             on(&mut sk, p, c);
         }
     }
-    for (p, c) in [(PointIdx(usize::MAX), a), (centre, usize::MAX)] {
+    for (p, c) in [(PointIdx(usize::MAX), a), (centre, CurveIdx(usize::MAX))] {
         sk.constraints.push(Constraint {
             id: format!("damaged{p}{c}"),
             kind: ConstraintKind::PointOnCurve { p, c },

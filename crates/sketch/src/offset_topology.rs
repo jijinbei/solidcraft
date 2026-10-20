@@ -5,7 +5,7 @@ use std::f64::consts::TAU;
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Seg2, Vec2};
 
-use crate::{Curve, CurveKind, OffsetChain, PointIdx, Sketch, SketchError};
+use crate::{Curve, CurveIdx, CurveKind, OffsetChain, PointIdx, Sketch, SketchError};
 type Result<T> = std::result::Result<T, SketchError>;
 const MAX_GROUPS: usize = 128;
 const MAX_ROLES: usize = 512;
@@ -148,8 +148,7 @@ impl Sketch {
                 return Err(invalid("duplicate convex offset source"));
             }
             let curve = self
-                .curves
-                .get(self.curve_index(id).ok_or_else(|| invalid("offset source vanished"))?)
+                .curve(self.curve_index(id).ok_or_else(|| invalid("offset source vanished"))?)
                 .ok_or_else(|| invalid("offset source vanished"))?;
             let get = |i| self.point(i).ok_or_else(|| invalid("offset source point vanished"));
             let piece = match curve.kind {
@@ -662,8 +661,7 @@ impl Sketch {
                 let mut roles = Vec::new();
                 for ((output, (_, forward)), source) in record.outputs.iter().zip(&record.sources).zip(&boundary.source) {
                     let curve = self
-                        .curves
-                        .get(self.curve_index(output).ok_or_else(|| invalid("missing legacy offset output"))?)
+                        .curve(self.curve_index(output).ok_or_else(|| invalid("missing legacy offset output"))?)
                         .ok_or_else(|| invalid("missing legacy offset output"))?;
                     let (a, b, kind) = match curve.kind {
                         CurveKind::Line { a, b } if source.arc.is_none() => (a, b, OffsetRoleKind::Line),
@@ -693,12 +691,11 @@ impl Sketch {
         }
         let retiring: BTreeSet<_> =
             topology.roles.iter().zip(&spans).filter_map(|(r, s)| (s.retired && !r.retired).then_some(r.output.clone())).collect();
-        let dead: BTreeSet<_> = self.curves.iter().enumerate().filter_map(|(i, c)| retiring.contains(c.id.as_str()).then_some(i)).collect();
+        let dead: BTreeSet<_> = self.curves.iter().enumerate().filter_map(|(i, c)| retiring.contains(c.id.as_str()).then_some(CurveIdx(i))).collect();
         for role in &mut topology.roles {
             if retiring.contains(role.output.as_str()) {
                 let curve = self
-                    .curves
-                    .get(self.curve_index(&role.output).ok_or_else(|| invalid("missing retiring curve"))?)
+                    .curve(self.curve_index(&role.output).ok_or_else(|| invalid("missing retiring curve"))?)
                     .ok_or_else(|| invalid("missing retiring curve"))?;
                 role.flags = OffsetRoleFlags::of(curve);
             }
@@ -717,19 +714,19 @@ impl Sketch {
         let mut map = vec![None; self.curves.len()];
         let mut next = 0usize;
         for (i, slot) in map.iter_mut().enumerate() {
-            if !dead.contains(&i) {
-                *slot = Some(next);
+            if !dead.contains(&CurveIdx(i)) {
+                *slot = Some(CurveIdx(next));
                 next += 1;
             }
         }
         let mut i = 0;
         self.curves.retain(|_| {
-            let keep = !dead.contains(&i);
+            let keep = !dead.contains(&CurveIdx(i));
             i += 1;
             keep
         });
         for constraint in &mut self.constraints {
-            if !constraint.kind.remap(&Some, &|i| map.get(i).copied().flatten()) {
+            if !constraint.kind.remap(&Some, &|i| map.get(i.0).copied().flatten()) {
                 return Err(invalid("offset constraint remapping failed"));
             }
         }
@@ -754,7 +751,7 @@ impl Sketch {
                     None => CurveKind::Line { a, b },
                 };
                 if let Some(ci) = self.curve_index(&role.output) {
-                    if let Some(curve) = self.curves.get_mut(ci) {
+                    if let Some(curve) = self.curve_mut(ci) {
                         curve.kind = kind;
                     }
                 } else {

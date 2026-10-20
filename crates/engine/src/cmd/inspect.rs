@@ -1,7 +1,7 @@
 //! Inspection: measure bodies, describe the document, sketches and model topology.
 
 use serde_json::{Value, json};
-use solidcraft_sketch::{CurveKind, PointIdx};
+use solidcraft_sketch::{CurveIdx, CurveKind, PointIdx};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
@@ -151,6 +151,7 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         .enumerate()
         .map(|(i, c)| {
             let det = ss.report.curve_determined.get(i).copied().unwrap_or(false);
+            let i = CurveIdx(i);
             let pid = |k: PointIdx| sk.spoint(k).map(|p| p.id.clone()).unwrap_or_default();
             let mut v = match c.kind {
                 CurveKind::Line { a, b } => json!({"id": c.id, "type": "line", "start": pid(a), "end": pid(b), "start_at": sk.point(a), "end_at": sk.point(b), "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),

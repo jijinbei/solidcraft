@@ -4,6 +4,7 @@
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::sketch::CurveIdx;
 
 use crate::scenario::Harness;
 use crate::test_support::play;
@@ -24,7 +25,7 @@ fn text_move_drag_is_one_editable_unit_and_escape_restores_the_gesture() {
         let sk = h.app.session.doc.sketch(1).unwrap();
         let line = sk.curves.last().unwrap().id.clone();
         let neighbor = point(&h, &format!("{line}.start"));
-        let polyline = sk.polyline(0);
+        let polyline = sk.polyline(CurveIdx(0));
         let at = (polyline[0] + polyline[1]) * 0.5;
         let a = screen(&mut h, at.x, at.y);
         let b = screen(&mut h, at.x + 3.0, at.y + 2.0);

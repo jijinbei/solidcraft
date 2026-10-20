@@ -18,7 +18,7 @@ use solidcraft_geom::{Seg2, Vec2};
 
 use crate::decompose::Budget;
 use crate::linalg::{Mat, determined_vars, solve as lin_solve};
-use crate::model::{ConstraintKind, CurveKind, PointIdx, Sketch};
+use crate::model::{ConstraintKind, CurveIdx, CurveKind, PointIdx, Sketch};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
 use crate::union_find::{find, union};
@@ -138,13 +138,17 @@ impl Layout {
     fn var_of(&self, p: PointIdx) -> Option<usize> {
         self.pvar.get(p.0).copied().flatten()
     }
+    /// The radius variable of curve `c`; None when its radius is a constant (or it has none).
+    fn radius_var(&self, c: CurveIdx) -> Option<usize> {
+        self.rvar.get(c.0).copied().flatten()
+    }
 }
 
 /// Geometry held in place for one solve: points and curves whose radius is held.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Hold {
     pub points: Vec<PointIdx>,
-    pub radii: Vec<usize>,
+    pub radii: Vec<CurveIdx>,
 }
 
 /// Per point: a constant for this solve (locked — fixed, fixed by a constraint, a point of a
@@ -178,7 +182,7 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
         .iter()
         .enumerate()
         .map(|(i, c)| match c.kind {
-            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) => {
+            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() && !c.fixed && !hold.radii.contains(&CurveIdx(i)) => {
                 n += 1;
                 Some(n - 1)
             }
@@ -215,17 +219,17 @@ impl State<'_> {
         }
     }
 
-    fn line(&self, l: usize) -> (Vec2, Vec2) {
-        match self.sk.curves.get(l).map(|c| &c.kind) {
+    fn line(&self, l: CurveIdx) -> (Vec2, Vec2) {
+        match self.sk.curve(l).map(|c| &c.kind) {
             Some(CurveKind::Line { a, b }) => (self.p(*a), self.p(*b)),
             _ => (Vec2::ZERO, Vec2::X),
         }
     }
     /// Centre and radius of a circle or arc.
-    fn round(&self, c: usize) -> (Vec2, f64) {
-        match self.sk.curves.get(c).map(|c| &c.kind) {
+    fn round(&self, c: CurveIdx) -> (Vec2, f64) {
+        match self.sk.curve(c).map(|c| &c.kind) {
             Some(CurveKind::Circle { c: ci, r }) => {
-                let r = match self.lay.rvar.get(c).copied().flatten() {
+                let r = match self.lay.radius_var(c) {
                     Some(v) => self.x.get(v).copied().unwrap_or(*r),
                     None => *r,
                 };
@@ -238,17 +242,17 @@ impl State<'_> {
             _ => (Vec2::ZERO, 0.0),
         }
     }
-    fn is_line(&self, c: usize) -> bool {
-        matches!(self.sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }))
+    fn is_line(&self, c: CurveIdx) -> bool {
+        matches!(self.sk.curve(c).map(|c| &c.kind), Some(CurveKind::Line { .. }))
     }
-    fn is_freeform(&self, c: usize) -> bool {
-        self.sk.curves.get(c).is_some_and(|c| c.kind.is_freeform())
+    fn is_freeform(&self, c: CurveIdx) -> bool {
+        self.sk.curve(c).is_some_and(|c| c.kind.is_freeform())
     }
     /// Polyline of a free-form curve with trial values.
-    fn poly(&self, c: usize) -> Vec<Vec2> {
-        match self.sk.curves.get(c).map(|c| &c.kind) {
+    fn poly(&self, c: CurveIdx) -> Vec<Vec2> {
+        match self.sk.curve(c).map(|c| &c.kind) {
             Some(CurveKind::Ellipse { c: ci, m, r }) => {
-                let r = match self.lay.rvar.get(c).copied().flatten() {
+                let r = match self.lay.radius_var(c) {
                     Some(v) => self.x.get(v).copied().unwrap_or(*r),
                     None => *r,
                 };
@@ -274,8 +278,8 @@ impl State<'_> {
         }
         points
     }
-    fn freeform_dist(&self, c: usize, q: Vec2) -> f64 {
-        let segs: Vec<Seg2> = match self.sk.curves.get(c).map(|c| &c.kind) {
+    fn freeform_dist(&self, c: CurveIdx, q: Vec2) -> f64 {
+        let segs: Vec<Seg2> = match self.sk.curve(c).map(|c| &c.kind) {
             Some(CurveKind::Ellipse { c: ci, m, .. }) => {
                 let center = self.p(*ci);
                 let u = self.p(*m) - center;
@@ -322,21 +326,21 @@ impl State<'_> {
             .unwrap_or_else(|| crate::curves::polyline_signed_dist(&self.poly(c), q))
     }
     /// Radius of a circle or arc; an ellipse's minor radius.
-    fn radius_of(&self, c: usize) -> f64 {
-        match self.sk.curves.get(c).map(|x| &x.kind) {
-            Some(CurveKind::Ellipse { r, .. }) => match self.lay.rvar.get(c).copied().flatten() {
+    fn radius_of(&self, c: CurveIdx) -> f64 {
+        match self.sk.curve(c).map(|x| &x.kind) {
+            Some(CurveKind::Ellipse { r, .. }) => match self.lay.radius_var(c) {
                 Some(v) => self.x.get(v).copied().unwrap_or(*r),
                 None => *r,
             },
             _ => self.round(c).1,
         }
     }
-    fn ends(&self, c: usize) -> Option<(PointIdx, PointIdx)> {
-        self.sk.curves.get(c)?.kind.ends()
+    fn ends(&self, c: CurveIdx) -> Option<(PointIdx, PointIdx)> {
+        self.sk.curve(c)?.kind.ends()
     }
     /// Length along an arc (counter-clockwise from its start).
-    fn arc_length(&self, c: usize) -> f64 {
-        match self.sk.curves.get(c).map(|c| &c.kind) {
+    fn arc_length(&self, c: CurveIdx) -> f64 {
+        match self.sk.curve(c).map(|c| &c.kind) {
             Some(CurveKind::Arc { c: ci, a, b }) => {
                 let (cc, pa, pb) = (self.p(*ci), self.p(*a), self.p(*b));
                 let mut sw = (pb - cc).angle() - (pa - cc).angle();
@@ -348,28 +352,28 @@ impl State<'_> {
             _ => 0.0,
         }
     }
-    fn arc_sweep(&self, c: usize) -> f64 {
-        let Some(curve) = self.sk.curves.get(c) else { return 0.0 };
+    fn arc_sweep(&self, c: CurveIdx) -> f64 {
+        let Some(curve) = self.sk.curve(c) else { return 0.0 };
         let CurveKind::Arc { c: cp, a, b } = curve.kind else { return 0.0 };
         let sweep = ((self.p(b) - self.p(cp)).angle() - (self.p(a) - self.p(cp)).angle()).rem_euclid(std::f64::consts::TAU);
         if curve.reversed { -sweep } else { sweep }
     }
     /// What a line-to-circle distance measures: the gap from line `l` to the edge of circle or
     /// arc `c`, or (`inside`) how far the edge reaches past the line.
-    fn line_circle_gap(&self, l: usize, c: usize, inside: bool) -> f64 {
+    fn line_circle_gap(&self, l: CurveIdx, c: CurveIdx, inside: bool) -> f64 {
         let (a, b) = self.line(l);
         let (cc, r) = self.round(c);
         let d = line_dist(cc, a, b).abs();
         if inside { r - d } else { d - r }
     }
-    fn slot_length(&self, a: usize, b: usize) -> f64 {
+    fn slot_length(&self, a: CurveIdx, b: CurveIdx) -> f64 {
         let (ca, ra) = self.round(a);
         let (cb, rb) = self.round(b);
         ca.dist(cb) + ra + rb
     }
     /// Curvature vector of a curve at its point `p` (towards the centre of curvature).
-    fn curvature_at(&self, c: usize, p: PointIdx) -> Vec2 {
-        let Some(kind) = self.sk.curves.get(c).map(|c| &c.kind) else { return Vec2::ZERO };
+    fn curvature_at(&self, c: CurveIdx, p: PointIdx) -> Vec2 {
+        let Some(kind) = self.sk.curve(c).map(|c| &c.kind) else { return Vec2::ZERO };
         match kind {
             CurveKind::Line { .. } | CurveKind::Ellipse { .. } => Vec2::ZERO,
             CurveKind::Circle { .. } | CurveKind::Arc { .. } => {
@@ -388,8 +392,8 @@ impl State<'_> {
         }
     }
     /// Unit tangent of any curve at its point `p` (an end point for open free-form curves).
-    fn tangent_at(&self, c: usize, p: PointIdx) -> Option<Vec2> {
-        match self.sk.curves.get(c).map(|c| &c.kind)? {
+    fn tangent_at(&self, c: CurveIdx, p: PointIdx) -> Option<Vec2> {
+        match self.sk.curve(c).map(|c| &c.kind)? {
             CurveKind::Line { a, b } => (self.p(*b) - self.p(*a)).normalized(),
             CurveKind::Circle { .. } | CurveKind::Arc { .. } => (self.p(p) - self.round(c).0).perp().normalized(),
             CurveKind::Spline { pts, control, periodic, .. } => {
@@ -571,7 +575,7 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
             let (a, b) = s.line(l);
             // A dimension with no typed length must not satisfy its angle by collapsing
             // the line. Scale with the original geometry, independently of the unknowns.
-            let scale = match s.sk.curves.get(l).map(|c| &c.kind) {
+            let scale = match s.sk.curve(l).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => s.sk.point(*a).zip(s.sk.point(*b)).map(|(a, b)| a.dist(b)).unwrap_or(1.0),
                 _ => 1.0,
             };
@@ -720,8 +724,8 @@ fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
 }
 
 /// Every (point, curve) pair of a point-on-curve constraint, sorted (for [`touch_point`]).
-pub(crate) fn points_on_curves(sk: &Sketch) -> Vec<(PointIdx, usize)> {
-    let mut on: Vec<(PointIdx, usize)> = sk
+pub(crate) fn points_on_curves(sk: &Sketch) -> Vec<(PointIdx, CurveIdx)> {
+    let mut on: Vec<(PointIdx, CurveIdx)> = sk
         .constraints
         .iter()
         .filter_map(|c| match c.kind {
@@ -735,10 +739,10 @@ pub(crate) fn points_on_curves(sk: &Sketch) -> Vec<(PointIdx, usize)> {
 
 /// A point where a tangency must happen: an end point shared by the two curves, or a line end
 /// point constrained onto the round curve (`on_curve` from [`points_on_curves`]).
-pub(crate) fn touch_point(sk: &Sketch, k: &ConstraintKind, on_curve: &[(PointIdx, usize)]) -> Option<PointIdx> {
+pub(crate) fn touch_point(sk: &Sketch, k: &ConstraintKind, on_curve: &[(PointIdx, CurveIdx)]) -> Option<PointIdx> {
     let ConstraintKind::Tangent { a, b } = *k else { return None };
-    let ends = |c: usize| -> Vec<PointIdx> {
-        match sk.curves.get(c).map(|c| &c.kind) {
+    let ends = |c: CurveIdx| -> Vec<PointIdx> {
+        match sk.curve(c).map(|c| &c.kind) {
             Some(k) => k.ends().map(|(a, b)| vec![a, b]).unwrap_or_default(),
             None => Vec::new(),
         }
@@ -747,7 +751,7 @@ pub(crate) fn touch_point(sk: &Sketch, k: &ConstraintKind, on_curve: &[(PointIdx
     if let Some(p) = ea.iter().find(|p| eb.contains(p)) {
         return Some(*p);
     }
-    let on = |p: PointIdx, c: usize| on_curve.binary_search(&(p, c)).is_ok();
+    let on = |p: PointIdx, c: CurveIdx| on_curve.binary_search(&(p, c)).is_ok();
     ea.iter().find(|p| on(**p, b)).or_else(|| eb.iter().find(|p| on(**p, a))).copied()
 }
 
@@ -764,7 +768,7 @@ fn block_vars(sk: &Sketch, lay: &Layout, b: &Block) -> (Vec<usize>, bool) {
         None => true,
     };
     for r in block_refs(sk, b) {
-        let (c, fits): (usize, fn(&CurveKind) -> bool) = match r {
+        let (c, fits): (CurveIdx, fn(&CurveKind) -> bool) = match r {
             Ref::Point(p) => {
                 constant |= pt(&mut v, p);
                 continue;
@@ -774,14 +778,14 @@ fn block_vars(sk: &Sketch, lay: &Layout, b: &Block) -> (Vec<usize>, bool) {
             Ref::Round(c) => (c, |k| matches!(k, CurveKind::Circle { .. } | CurveKind::Arc { .. })),
         };
         // A curve of another kind reads as a constant (see `State::line`, `State::round`).
-        let Some(k) = sk.curves.get(c).map(|c| &c.kind).filter(|k| fits(k)) else {
+        let Some(k) = sk.curve(c).map(|c| &c.kind).filter(|k| fits(k)) else {
             constant = true;
             continue;
         };
         for q in k.point_ids() {
             constant |= pt(&mut v, q);
         }
-        v.extend(lay.rvar.get(c).copied().flatten());
+        v.extend(lay.radius_var(c));
     }
     v.sort_unstable();
     v.dedup();
@@ -794,20 +798,20 @@ fn block_vars(sk: &Sketch, lay: &Layout, b: &Block) -> (Vec<usize>, bool) {
 enum Ref {
     Point(PointIdx),
 
-    Curve(usize),
-    Line(usize),
-    Round(usize),
+    Curve(CurveIdx),
+    Line(CurveIdx),
+    Round(CurveIdx),
 }
 
 /// What a block reads.
 fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
     use ConstraintKind::*;
     use Ref::{Curve as C, Line as L, Point as P, Round as R};
-    let is = |c: usize, f: fn(&CurveKind) -> bool| sk.curves.get(c).is_some_and(|x| f(&x.kind));
-    let line = |c: usize| is(c, |k| matches!(k, CurveKind::Line { .. }));
-    let freeform = |c: usize| is(c, CurveKind::is_freeform);
+    let is = |c: CurveIdx, f: fn(&CurveKind) -> bool| sk.curve(c).is_some_and(|x| f(&x.kind));
+    let line = |c: CurveIdx| is(c, |k| matches!(k, CurveKind::Line { .. }));
+    let freeform = |c: CurveIdx| is(c, CurveKind::is_freeform);
     // A tangency reads a free-form curve as such, else a line and a round, or two rounds.
-    let tangent = |a: usize, b: usize| {
+    let tangent = |a: CurveIdx, b: CurveIdx| {
         if freeform(a) || freeform(b) {
             [C(a), C(b)]
         } else if line(a) {
@@ -1496,7 +1500,7 @@ fn initial_x(sk: &Sketch, lay: &Layout) -> Vec<f64> {
 /// The solve's blocks in order (the curves' own relations, then the driving constraints in
 /// constraint order) with the variables each reads, and per block whether it reads a constant
 /// point.
-fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(PointIdx, usize)]) -> (Vec<(Block<'a>, Vec<usize>)>, Vec<bool>) {
+fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(PointIdx, CurveIdx)]) -> (Vec<(Block<'a>, Vec<usize>)>, Vec<bool>) {
     let mut raw = Vec::new();
     for c in &sk.curves {
         if let CurveKind::Spline { pts, periodic: true, .. } = &c.kind
@@ -1629,7 +1633,7 @@ fn nudge_line_angles(sk: &Sketch, lay: &Layout, x: &mut [f64]) {
             continue;
         }
         let ConstraintKind::LineAngle { l, value } = constraint.kind else { continue };
-        let Some(CurveKind::Line { a, b }) = sk.curves.get(l).map(|c| &c.kind) else { continue };
+        let Some(CurveKind::Line { a, b }) = sk.curve(l).map(|c| &c.kind) else { continue };
         let state = State { sk, lay, x };
         let (pa, pb) = (state.p(*a), state.p(*b));
         let delta = wrap_angle((pb - pa).angle() - value);
@@ -1666,7 +1670,7 @@ enum Orient {
     SideY(PointIdx, PointIdx, f64),
     /// Which side of line `l` the point `p` is on (`PointLineDistance`, `LinearDiameter`, a
     /// circle's centre for `LineCircleDistance`).
-    OfLine(PointIdx, usize, f64),
+    OfLine(PointIdx, CurveIdx, f64),
 }
 
 /// An orientation's signed offset in a state (a corner's distance from the opposite side, an
@@ -1817,7 +1821,7 @@ impl ValueEdit {
 fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> {
     use std::collections::{BTreeMap, BTreeSet};
     let free = |p: PointIdx| s.lay.var_of(p).is_some();
-    let line = |l: usize| match s.sk.curves.get(l).map(|c| &c.kind) {
+    let line = |l: CurveIdx| match s.sk.curve(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => Some((*a, *b)),
         _ => None,
     };
@@ -1836,7 +1840,7 @@ fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> 
             ConstraintKind::LinearDiameter { p, l, value } => out.push((Orient::OfLine(p, l, value / 2.0), vec![*ci])),
             // The circle stays on its side of the line: the distance is unsigned.
             ConstraintKind::LineCircleDistance { l, c, value, .. } => {
-                if let Some(CurveKind::Circle { c: centre, .. } | CurveKind::Arc { c: centre, .. }) = s.sk.curves.get(c).map(|x| &x.kind) {
+                if let Some(CurveKind::Circle { c: centre, .. } | CurveKind::Arc { c: centre, .. }) = s.sk.curve(c).map(|x| &x.kind) {
                     out.push((Orient::OfLine(*centre, l, value + s.round(c).1), vec![*ci]));
                 }
             }
@@ -1957,7 +1961,7 @@ fn solve_inner(
         if !constraint.driven
             && let ConstraintKind::ArcSweep { c, value } = constraint.kind
             && value.is_finite()
-            && let Some(curve) = sk.curves.get_mut(c)
+            && let Some(curve) = sk.curves.get_mut(c.0)
             && let CurveKind::Arc { a, b, .. } = &mut curve.kind
             && curve.reversed != (value < 0.0)
         {
@@ -2361,7 +2365,7 @@ fn solve_inner(
     }
     if status == SolveStatus::Failed {
         for (ci, a_before, b_before, reversed) in orientation_before.into_iter().rev() {
-            if let Some(curve) = sk.curves.get_mut(ci)
+            if let Some(curve) = sk.curve_mut(ci)
                 && let CurveKind::Arc { a, b, .. } = &mut curve.kind
             {
                 *a = a_before;
@@ -2380,7 +2384,7 @@ fn solve_inner(
         Analysis::Full | Analysis::Freedom => (
             lay.n.saturating_sub(rank),
             (0..sk.points.len()).map(|i| pdet(PointIdx(i))).collect(),
-            sk.curves.iter().enumerate().map(|(i, c)| c.kind.point_ids().into_iter().all(pdet) && vdet(lay.rvar.get(i).copied().flatten())).collect(),
+            sk.curves.iter().enumerate().map(|(i, c)| c.kind.point_ids().into_iter().all(pdet) && vdet(lay.radius_var(CurveIdx(i)))).collect(),
         ),
         Analysis::StatusOnly => (0, Vec::new(), Vec::new()),
     };
@@ -2419,7 +2423,7 @@ mod continuation_unit_tests {
 
     #[test]
     fn angles_step_the_short_way_round() {
-        let line = ConstraintKind::LineAngle { l: 0, value: 0.0 };
+        let line = ConstraintKind::LineAngle { l: CurveIdx(0), value: 0.0 };
         let (old, new) = (179f64.to_radians(), (-179f64).to_radians());
         let half = value_at(&line, old, new, 0.5);
         assert!((half - 180f64.to_radians()).abs() < 1e-12, "{}", half.to_degrees());
@@ -2432,10 +2436,10 @@ mod continuation_unit_tests {
 
     #[test]
     fn a_sweep_changing_sign_is_not_stepped() {
-        let sweep = ConstraintKind::ArcSweep { c: 0, value: 0.0 };
+        let sweep = ConstraintKind::ArcSweep { c: CurveIdx(0), value: 0.0 };
         assert!(!steppable(&sweep, 1.0, -1.0));
         assert!(steppable(&sweep, 1.0, 2.0));
-        assert!(steppable(&ConstraintKind::LineAngle { l: 0, value: 0.0 }, 3.0, -3.0));
+        assert!(steppable(&ConstraintKind::LineAngle { l: CurveIdx(0), value: 0.0 }, 3.0, -3.0));
     }
 
     #[test]

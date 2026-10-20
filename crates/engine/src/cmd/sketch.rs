@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::{FeatureKind, PlaneRef, expr::Kind};
 use solidcraft_geom::{Plane, Vec2, Vec3};
-use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, PointExprs, PointIdx, Sketch, SolveReport, solve, solve_with};
+use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveIdx, CurveKind, Hold, PointExprs, PointIdx, Sketch, SolveReport, solve, solve_with};
 
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_vec2, str_, string_list, vec2, vec3};
@@ -505,7 +505,7 @@ pub(super) fn add_placed_point(sk: &mut Sketch, at: Vec2, exprs: PointExprs, id:
     Ok(i)
 }
 
-pub(super) fn curve_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<usize> {
+pub(super) fn curve_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<CurveIdx> {
     let id = v.and_then(Value::as_str).ok_or_else(|| bad(cmd, format!("`{what}` must be a curve id")))?;
     sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown sketch curve `{id}`")))
 }
@@ -513,13 +513,13 @@ pub(super) fn curve_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -
 /// A line a constraint refers to: a curve id, or `x` / `y` for the sketch's own axes (a curve
 /// with that id wins). An axis becomes the sketch's linked construction line on it
 /// ([`Sketch::sketch_axis_line`]), added on first use and reported in `created`.
-pub(super) fn line_or_axis_ref(sk: &mut Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<usize> {
+pub(super) fn line_or_axis_ref(sk: &mut Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<CurveIdx> {
     let id = v.and_then(Value::as_str).ok_or_else(|| bad(cmd, format!("`{what}` must be a curve id, or x / y for a sketch axis")))?;
     curve_or_axis(sk, id)?.ok_or_else(|| bad(cmd, format!("unknown sketch curve `{id}` (x and y name the sketch's own axes)")))
 }
 
 /// Curve `id`, or the line of sketch axis `id` (see [`line_or_axis_ref`]); `None` when neither.
-fn curve_or_axis(sk: &mut Sketch, id: &str) -> Result<Option<usize>> {
+fn curve_or_axis(sk: &mut Sketch, id: &str) -> Result<Option<CurveIdx>> {
     match sk.curve_index(id) {
         Some(c) => Ok(Some(c)),
         None => Ok(sk.sketch_axis_line(id)?),
@@ -531,18 +531,18 @@ pub(super) fn point_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -
     sk.resolve_point(id).ok_or_else(|| bad(cmd, format!("unknown sketch point `{id}`")))
 }
 
-pub(super) fn ids_of(sk: &Sketch, curves: &[usize]) -> Vec<String> {
-    curves.iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect()
+pub(super) fn ids_of(sk: &Sketch, curves: &[CurveIdx]) -> Vec<String> {
+    curves.iter().filter_map(|c| sk.curve(*c).map(|c| c.id.clone())).collect()
 }
 
 pub(super) fn add_c(sk: &mut Sketch, k: ConstraintKind) -> Result<String> {
     Ok(sk.add_constraint(k, None)?)
 }
 
-pub(super) fn mark_construction(sk: &mut Sketch, curves: &[usize], p: &Value) {
+pub(super) fn mark_construction(sk: &mut Sketch, curves: &[CurveIdx], p: &Value) {
     if bool_(p, "construction").unwrap_or(false) {
         for c in curves {
-            if let Some(cu) = sk.curves.get_mut(*c) {
+            if let Some(cu) = sk.curve_mut(*c) {
                 cu.construction = true;
             }
         }
@@ -878,7 +878,7 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let id = ids.get(i).map(String::as_str);
             let c = sk.add_line(a.pos(), b.pos(), pts.get(i).copied().flatten(), pts.get(j).copied().flatten(), id)?;
-            if let Some(CurveKind::Line { a: pa, b: pb }) = sk.curves.get(c).map(|c| c.kind.clone()) {
+            if let Some(CurveKind::Line { a: pa, b: pb }) = sk.curve(c).map(|c| c.kind.clone()) {
                 if let Some(slot) = pts.get_mut(i) {
                     *slot = Some(pa);
                 }
@@ -913,11 +913,12 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
 /// to an arc, or perpendicular to a line (parallel continuations are left alone). `axis`: the
 /// line already got horizontal/vertical, so a perpendicular to an axis-aligned line would be
 /// redundant.
-fn infer_at_start(sk: &Sketch, c: usize, axis: bool) -> Option<ConstraintKind> {
-    let CurveKind::Line { a, b } = sk.curves.get(c)?.kind else { return None };
+fn infer_at_start(sk: &Sketch, c: CurveIdx, axis: bool) -> Option<ConstraintKind> {
+    let CurveKind::Line { a, b } = sk.curve(c)?.kind else { return None };
     let (pa, pb) = (sk.point(a)?, sk.point(b)?);
     let u = (pb - pa).normalized()?;
     for (i, o) in sk.curves.iter().enumerate() {
+        let i = CurveIdx(i);
         if i == c || !o.kind.uses(a) {
             continue;
         }
@@ -942,7 +943,7 @@ fn infer_at_start(sk: &Sketch, c: usize, axis: bool) -> Option<ConstraintKind> {
 }
 
 /// Closed polygon of lines through new or referenced corner points.
-fn polygon_lines(sk: &mut Sketch, corners: &[Vec2]) -> Result<(Vec<usize>, Vec<PointIdx>)> {
+fn polygon_lines(sk: &mut Sketch, corners: &[Vec2]) -> Result<(Vec<CurveIdx>, Vec<PointIdx>)> {
     let pts: Vec<PointIdx> = corners.iter().map(|c| sk.add_point(*c, None)).collect::<std::result::Result<_, _>>()?;
     let n = pts.len();
     let mut lines = Vec::new();
@@ -953,7 +954,7 @@ fn polygon_lines(sk: &mut Sketch, corners: &[Vec2]) -> Result<(Vec<usize>, Vec<P
     Ok((lines, pts))
 }
 
-fn rect_constraints(sk: &mut Sketch, l: &[usize]) -> Result<Vec<String>> {
+fn rect_constraints(sk: &mut Sketch, l: &[CurveIdx]) -> Result<Vec<String>> {
     let mut cons = Vec::new();
     if let [a, b, c, d] = l[..] {
         cons.push(add_c(sk, ConstraintKind::Horizontal { l: a })?);
@@ -967,8 +968,8 @@ fn rect_constraints(sk: &mut Sketch, l: &[usize]) -> Result<Vec<String>> {
 /// Whether line `l` being horizontal (`horizontal`) or vertical already follows from another
 /// constraint than `own`: its ends coincide with the ends of a line constrained the same way (a
 /// side two rectangles share), or with two points constrained level (or plumb).
-fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
-    let Some(CurveKind::Line { a, b }) = sk.curves.get(l).map(|c| &c.kind) else { return false };
+fn axis_implied(sk: &Sketch, l: CurveIdx, horizontal: bool, own: &str) -> bool {
+    let Some(CurveKind::Line { a, b }) = sk.curve(l).map(|c| &c.kind) else { return false };
     let (a, b) = (*a, *b);
     // Coincident points as one (union-find over the coincident constraints).
     let mut parent: Vec<usize> = (0..sk.points.len()).collect();
@@ -995,7 +996,7 @@ fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
     sk.constraints.iter().filter(|c| c.id != own).any(|c| {
         let ends = match (&c.kind, horizontal) {
             (ConstraintKind::Horizontal { l: m }, true) | (ConstraintKind::Vertical { l: m }, false) if *m != l => {
-                match sk.curves.get(*m).map(|c| &c.kind) {
+                match sk.curve(*m).map(|c| &c.kind) {
                     Some(CurveKind::Line { a, b }) => Some((*a, *b)),
                     _ => None,
                 }
@@ -1035,8 +1036,8 @@ fn drop_implied_axes(sk: &mut Sketch, cons: &mut Vec<String>) {
 /// Which side and corner of an axis-aligned rectangle is which, from its lines and corner
 /// points as `polygon_lines` made them (counter-clockwise from the bottom-left corner), so a
 /// caller can dimension it without inspecting the sketch first.
-fn rect_names(sk: &Sketch, l: &[usize], pts: &[PointIdx]) -> Value {
-    let curve = |i: usize| l.get(i).and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone());
+fn rect_names(sk: &Sketch, l: &[CurveIdx], pts: &[PointIdx]) -> Value {
+    let curve = |i: usize| l.get(i).and_then(|c| sk.curve(*c)).map(|c| c.id.clone());
     let point = |i: usize| pts.get(i).and_then(|q| sk.spoint(*q)).map(|q| q.id.clone());
     json!({
         "sides": {"bottom": curve(0), "right": curve(1), "top": curve(2), "left": curve(3)},
@@ -1144,7 +1145,7 @@ fn rect_center(s: &mut Session, p: &Value) -> Result<Value> {
             let diag = sk.add_line_pts(*p0, *p2, None)?;
             let diag2 = sk.add_line_pts(*p1, *p3, None)?;
             for d in [diag, diag2] {
-                if let Some(cu) = sk.curves.get_mut(d) {
+                if let Some(cu) = sk.curve_mut(d) {
                     cu.construction = true;
                 }
             }
@@ -1266,7 +1267,7 @@ fn arc_three(s: &mut Session, p: &Value) -> Result<Value> {
         let ccw = ccw_span(ang(a.pos()), ang(t.pos())) < ccw_span(ang(a.pos()), ang(b.pos()));
         let (s0, e0) = if ccw { (a, b) } else { (b, a) };
         let ci = sk.add_arc(o, s0.pos(), e0.pos(), [None, s0.idx(), e0.idx()], id.as_deref())?;
-        if let Some(c) = sk.curves.get_mut(ci) {
+        if let Some(c) = sk.curve_mut(ci) {
             c.reversed = !ccw;
         }
         let mut cons = Vec::new();
@@ -1305,7 +1306,7 @@ fn arc_center(s: &mut Session, p: &Value) -> Result<Value> {
                 sk.add_arc(c.pos(), a.pos(), end, [c.idx(), Some(ai), Some(bi)], Some(&cid))?
             } else {
                 let ci = sk.add_arc(c.pos(), end, a.pos(), [c.idx(), Some(bi), Some(ai)], Some(&cid))?;
-                if let Some(cu) = sk.curves.get_mut(ci) {
+                if let Some(cu) = sk.curve_mut(ci) {
                     cu.reversed = true;
                 }
                 ci
@@ -1333,8 +1334,8 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
         // Construction circle tying the polygon to its centre.
         let rc = if inscribed { r_vertex } else { r_vertex * (std::f64::consts::PI / n as f64).cos() };
         let circ = sk.add_circle(center, rc, None, None)?;
-        support_circle = sk.curves.get(circ).map(|c| c.id.clone()).unwrap_or_default();
-        if let Some(cu) = sk.curves.get_mut(circ) {
+        support_circle = sk.curve(circ).map(|c| c.id.clone()).unwrap_or_default();
+        if let Some(cu) = sk.curve_mut(circ) {
             cu.construction = true;
         }
         if inscribed {
@@ -1508,7 +1509,7 @@ fn constrain(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&mut Sketch) 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Ent {
     Point(PointIdx),
-    Curve(usize),
+    Curve(CurveIdx),
 }
 
 fn ent(sk: &Sketch, r: &str) -> Option<Ent> {
@@ -1526,7 +1527,7 @@ fn entity_order(sk: &Sketch, p: &Value) -> Option<(Ent, Ent)> {
 fn ent_locked(sk: &Sketch, rep: &SolveReport, e: Ent) -> bool {
     match e {
         Ent::Point(i) => sk.point_locked(i) || rep.point_determined.get(i.0).copied().unwrap_or(false),
-        Ent::Curve(c) => sk.curve_locked(c) || rep.curve_determined.get(c).copied().unwrap_or(false),
+        Ent::Curve(c) => sk.curve_locked(c) || rep.curve_determined.get(c.0).copied().unwrap_or(false),
     }
 }
 
@@ -1537,7 +1538,7 @@ fn hold_of(sk: &Sketch, ents: &[Ent], radius: bool) -> Hold {
         match *e {
             Ent::Point(i) => h.points.push(i),
             Ent::Curve(c) => {
-                h.points.extend(sk.curves.get(c).map(|c| c.kind.point_ids()).unwrap_or_default());
+                h.points.extend(sk.curve(c).map(|c| c.kind.point_ids()).unwrap_or_default());
                 h.radii.push(c);
             }
         }
@@ -1550,12 +1551,12 @@ fn hold_of(sk: &Sketch, ents: &[Ent], radius: bool) -> Hold {
 
 /// Did a solve shrink a line or an arc to nothing (a degenerate way to satisfy tangency)?
 fn collapsed(before: &Sketch, after: &Sketch) -> bool {
-    let size = |sk: &Sketch, i: usize| match sk.curves.get(i).map(|c| &c.kind) {
+    let size = |sk: &Sketch, i: CurveIdx| match sk.curve(i).map(|c| &c.kind) {
         Some(CurveKind::Line { .. }) => line_pts(sk, i).map(|(a, b)| a.dist(b)),
         Some(CurveKind::Arc { .. } | CurveKind::Circle { .. }) => sk.radius(i),
         _ => None,
     };
-    (0..before.curves.len()).any(|i| match (size(before, i), size(after, i)) {
+    (0..before.curves.len()).map(CurveIdx).any(|i| match (size(before, i), size(after, i)) {
         (Some(b), Some(a)) => b > 1e-6 && a < b * 1e-3,
         _ => false,
     })
@@ -1570,7 +1571,7 @@ fn keep_size(sk: &Sketch, e: Ent) -> Vec<ConstraintKind> {
             sk,
             match e {
                 Ent::Curve(c) => c,
-                Ent::Point(_) => usize::MAX,
+                Ent::Point(_) => CurveIdx(usize::MAX),
             },
         ),
     ) {
@@ -1733,7 +1734,7 @@ fn existing_midpoint(sk: &Sketch, l: usize) -> Option<usize> {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AlignmentTarget {
     Point(PointIdx),
-    Midpoint(usize),
+    Midpoint(CurveIdx),
 }
 
 impl AlignmentTarget {
@@ -1764,7 +1765,7 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
             let target = |v: &Value| -> Result<AlignmentTarget> {
                 if let Some(line) = v.get("midpoint") {
                     let l = curve_ref(sk, Some(line), cmd, "midpoint")?;
-                    if !matches!(sk.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { .. })) {
+                    if !matches!(sk.curve(l).map(|c| &c.kind), Some(CurveKind::Line { .. })) {
                         return Err(bad(cmd, "a midpoint reference needs a line"));
                     }
                     Ok(AlignmentTarget::Midpoint(l))
@@ -1793,7 +1794,7 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(if horiz { ConstraintKind::HorizontalPoints { p: a, q: b } } else { ConstraintKind::VerticalPoints { p: a, q: b } });
         }
         let l = curve_ref(sk, p.get("line"), cmd, "line")?;
-        let (a, b) = match sk.curves.get(l).map(|c| &c.kind) {
+        let (a, b) = match sk.curve(l).map(|c| &c.kind) {
             Some(CurveKind::Line { a, b }) => (*a, *b),
             _ => return Err(bad(cmd, "`line` must be a line")),
         };
@@ -1886,7 +1887,7 @@ fn coincident_line_points(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(P
     if a == b {
         return Err(bad(cmd, "choose two distinct lines"));
     }
-    let ends = |i: usize| match sk.curves.get(i).map(|curve| &curve.kind) {
+    let ends = |i: CurveIdx| match sk.curve(i).map(|curve| &curve.kind) {
         Some(CurveKind::Line { a, b }) => Some([*a, *b]),
         _ => None,
     };
@@ -1910,12 +1911,12 @@ fn coincident_line_points(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(P
     Ok(Some((a, b)))
 }
 
-fn two_curves(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize)> {
+fn two_curves(sk: &Sketch, p: &Value, cmd: &str) -> Result<(CurveIdx, CurveIdx)> {
     Ok((curve_ref(sk, p.get("a"), cmd, "a")?, curve_ref(sk, p.get("b"), cmd, "b")?))
 }
 
 /// Two curves where either may be a sketch axis (`x` / `y`, see [`line_or_axis_ref`]).
-fn two_curves_or_axes(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<(usize, usize)> {
+fn two_curves_or_axes(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<(CurveIdx, CurveIdx)> {
     Ok((line_or_axis_ref(sk, p.get("a"), cmd, "a")?, line_or_axis_ref(sk, p.get("b"), cmd, "b")?))
 }
 
@@ -2045,7 +2046,7 @@ fn symmetric_about_point(sk: &mut Sketch, a: PointIdx, b: PointIdx, c: PointIdx,
         return Err(bad(cmd, "symmetry about a point needs two other points"));
     }
     let l = sk.add_line_pts(a, b, None)?;
-    if let Some(cu) = sk.curves.get_mut(l) {
+    if let Some(cu) = sk.curve_mut(l) {
         cu.construction = true;
     }
     add_c(sk, ConstraintKind::Midpoint { p: c, l })
@@ -2070,7 +2071,7 @@ fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
                 // their end points.
                 let ca = sk.curve_index(ra).ok_or_else(|| bad(cmd, format!("unknown entity `{ra}`")))?;
                 let cb = sk.curve_index(rb).ok_or_else(|| bad(cmd, format!("unknown entity `{rb}`")))?;
-                match (sk.curves.get(ca).map(|c| c.kind.clone()), sk.curves.get(cb).map(|c| c.kind.clone())) {
+                match (sk.curve(ca).map(|c| c.kind.clone()), sk.curve(cb).map(|c| c.kind.clone())) {
                     (Some(CurveKind::Line { a: a0, b: a1 }), Some(CurveKind::Line { a: b0, b: b1 })) => {
                         // Opposite sides of a rectangle run in opposite directions: pair each end
                         // with the end of the other line nearest its mirror image (#2961, #2940).
@@ -2099,7 +2100,7 @@ fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// True when the ends of line `a` mirror (about the line `l`) closer onto the ends of `b` crossed
 /// (`a0` with `b1`, `a1` with `b0`) than in order. A degenerate symmetry line keeps the order.
-fn mirror_pairing_is_crossed(sk: &Sketch, l: usize, a: [PointIdx; 2], b: [PointIdx; 2]) -> bool {
+fn mirror_pairing_is_crossed(sk: &Sketch, l: CurveIdx, a: [PointIdx; 2], b: [PointIdx; 2]) -> bool {
     let Some((o, e)) = line_pts(sk, l) else { return false };
     let d = e - o;
     let len2 = d.x * d.x + d.y * d.y;
@@ -2129,7 +2130,7 @@ fn symmetry_about_point(sk: &mut Sketch, p: &Value, c: PointIdx, cmd: &str) -> R
         _ => {
             let ca = sk.curve_index(ra).ok_or_else(|| bad(cmd, format!("unknown entity `{ra}`")))?;
             let cb = sk.curve_index(rb).ok_or_else(|| bad(cmd, format!("unknown entity `{rb}`")))?;
-            match (sk.curves.get(ca).map(|x| x.kind.clone()), sk.curves.get(cb).map(|x| x.kind.clone())) {
+            match (sk.curve(ca).map(|x| x.kind.clone()), sk.curve(cb).map(|x| x.kind.clone())) {
                 (Some(CurveKind::Line { a: a0, b: a1 }), Some(CurveKind::Line { a: b0, b: b1 })) => {
                     let pc = sk.point(c).unwrap_or_default();
                     let mirror = |i: PointIdx| pc * 2.0 - sk.point(i).unwrap_or_default();
@@ -2162,8 +2163,8 @@ fn symmetry_pairs(sk: &mut Sketch, pairs: &[(PointIdx, PointIdx)], c: PointIdx, 
     pairs.iter().map(|(a, b)| symmetric_about_point(sk, *a, *b, c, cmd)).collect()
 }
 
-fn round_center(sk: &Sketch, c: usize) -> Option<PointIdx> {
-    match sk.curves.get(c)?.kind {
+fn round_center(sk: &Sketch, c: CurveIdx) -> Option<PointIdx> {
+    match sk.curve(c)?.kind {
         CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
         _ => None,
     }
@@ -2209,7 +2210,7 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         for c in curves {
-            let Some(cu) = sk.curves.get_mut(c) else { continue };
+            let Some(cu) = sk.curve_mut(c) else { continue };
             if cu.link.is_some() {
                 continue;
             }
@@ -2228,8 +2229,8 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
 // ---------------------------------------------------------------------------------------------
 // Dimensions
 
-pub(super) fn line_pts(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
-    match sk.curves.get(l)?.kind {
+pub(super) fn line_pts(sk: &Sketch, l: CurveIdx) -> Option<(Vec2, Vec2)> {
+    match sk.curve(l)?.kind {
         CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
         _ => None,
     }
@@ -2271,7 +2272,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     let start = s.doc.clone();
     let ((param, kind_name, current), info) = edit(s, p, cmd, true, |sk, doc| {
         before = Some(dof_now(sk));
-        let mut ent = |r: &str| -> Result<(Option<PointIdx>, Option<usize>)> {
+        let mut ent = |r: &str| -> Result<(Option<PointIdx>, Option<CurveIdx>)> {
             if let Some(c) = sk.curve_index(r) {
                 return Ok((None, Some(c)));
             }
@@ -2292,15 +2293,15 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             Some(r) => Some(ent(r)?),
             None => None,
         };
-        let is_line = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }));
-        let is_circle = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. }));
-        let is_round = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+        let is_line = |c: CurveIdx| matches!(sk.curve(c).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+        let is_circle = |c: CurveIdx| matches!(sk.curve(c).map(|c| &c.kind), Some(CurveKind::Circle { .. }));
+        let is_round = |c: CurveIdx| matches!(sk.curve(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
         // The other reading of an angle between two lines (see below).
         let mut alt: Option<(ConstraintKind, f64)> = None;
         let (mut k, mut cur): (ConstraintKind, f64) = match (e0, e1) {
             ((None, Some(c)), None) if ty == "sweep" => {
                 let angle = arc_len(sk, c).zip(sk.radius(c)).map(|(len, r)| len / r).ok_or_else(|| bad(cmd, "sweep needs an arc"))?;
-                let angle = if sk.curves.get(c).is_some_and(|c| c.reversed) { -angle } else { angle };
+                let angle = if sk.curve(c).is_some_and(|c| c.reversed) { -angle } else { angle };
                 (ConstraintKind::ArcSweep { c, value: angle }, angle)
             }
             ((None, Some(c)), None) if is_line(c) => {
@@ -2323,9 +2324,9 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 let len = arc_len(sk, c).ok_or_else(|| bad(cmd, "arc length needs an arc"))?;
                 (ConstraintKind::ArcLength { c, value: len }, len)
             }
-            ((None, Some(c)), None) if matches!(sk.curves.get(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {
+            ((None, Some(c)), None) if matches!(sk.curve(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {
                 // Ellipse: the major radius is the centre–axis-end distance, the minor its own.
-                let Some(CurveKind::Ellipse { c: cp, m, r }) = sk.curves.get(c).map(|x| x.kind.clone()) else {
+                let Some(CurveKind::Ellipse { c: cp, m, r }) = sk.curve(c).map(|x| x.kind.clone()) else {
                     return Err(bad(cmd, "ellipse"));
                 };
                 if ty == "major" {
@@ -2378,7 +2379,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 let (da, db) = (a1 - a0, b1 - b0);
                 if da.cross(db).abs() < 1e-9 * da.len() * db.len() && ty != "angle" {
                     // Parallel lines: distance between them (a diameter about a centerline).
-                    let (a, b, b0) = if sk.curves.get(a).is_some_and(|c| c.centerline) { (a, b, b0) } else { (b, a, a0) };
+                    let (a, b, b0) = if sk.curve(a).is_some_and(|c| c.centerline) { (a, b, b0) } else { (b, a, a0) };
                     let (bq, _) = line_ends(sk, b);
                     let (a0, a1) = line_pts(sk, a).unwrap_or_default();
                     let d = (a1 - a0).normalized().map(|d| d.cross(b0 - a0).abs()).unwrap_or(0.0);
@@ -2614,20 +2615,20 @@ fn dimension_text(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Dimension a point (or a parallel line) to line `l` as a diameter: when `l` is a centerline
 /// (unless a plain distance was asked for) or when a diameter was asked for.
-fn diameter_about(sk: &Sketch, l: usize, ty: &str) -> bool {
-    ty == "diameter" || (ty == "auto" && sk.curves.get(l).is_some_and(|c| c.centerline))
+fn diameter_about(sk: &Sketch, l: CurveIdx, ty: &str) -> bool {
+    ty == "diameter" || (ty == "auto" && sk.curve(l).is_some_and(|c| c.centerline))
 }
 
-fn arc_len(sk: &Sketch, c: usize) -> Option<f64> {
+fn arc_len(sk: &Sketch, c: CurveIdx) -> Option<f64> {
     match sk.segs(c).first()? {
-        solidcraft_geom::Seg2::Arc { radius, sweep, .. } if matches!(sk.curves.get(c)?.kind, CurveKind::Arc { .. }) => Some(radius * sweep),
+        solidcraft_geom::Seg2::Arc { radius, sweep, .. } if matches!(sk.curve(c)?.kind, CurveKind::Arc { .. }) => Some(radius * sweep),
         _ => None,
     }
 }
 
 /// The angle dimension between two lines whose sector contains `t` (the text position): returns
 /// the constraint and the current value of that sector angle.
-fn angle_by_sector(a: usize, b: usize, (a0, a1): (Vec2, Vec2), (b0, b1): (Vec2, Vec2), t: Vec2) -> Option<(ConstraintKind, f64)> {
+fn angle_by_sector(a: CurveIdx, b: CurveIdx, (a0, a1): (Vec2, Vec2), (b0, b1): (Vec2, Vec2), t: Vec2) -> Option<(ConstraintKind, f64)> {
     let (da, db) = ((a1 - a0).normalized()?, (b1 - b0).normalized()?);
     let den = da.cross(db);
     if den.abs() < 1e-12 {
@@ -2637,7 +2638,8 @@ fn angle_by_sector(a: usize, b: usize, (a0, a1): (Vec2, Vec2), (b0, b1): (Vec2, 
     let x = a0 + da * s;
     let ta = (t - x).angle();
     // The four rays from the intersection, with their line and direction sign.
-    let mut rays: Vec<(f64, usize, bool)> = vec![(da.angle(), a, true), ((-da).angle(), a, false), (db.angle(), b, true), ((-db).angle(), b, false)];
+    let mut rays: Vec<(f64, CurveIdx, bool)> =
+        vec![(da.angle(), a, true), ((-da).angle(), a, false), (db.angle(), b, true), ((-db).angle(), b, false)];
     rays.sort_by(|p, q| p.0.total_cmp(&q.0));
     let tau = std::f64::consts::TAU;
     for k in 0..4 {
@@ -2656,8 +2658,8 @@ fn angle_by_sector(a: usize, b: usize, (a0, a1): (Vec2, Vec2), (b0, b1): (Vec2, 
 /// towards their other ends (#2724), and its supplement; None when they share no end or are
 /// collinear.
 fn angle_from_shared_end(
-    a: usize,
-    b: usize,
+    a: CurveIdx,
+    b: CurveIdx,
     (a0, a1): (Vec2, Vec2),
     (b0, b1): (Vec2, Vec2),
 ) -> Option<((ConstraintKind, f64), (ConstraintKind, f64))> {
@@ -2689,8 +2691,8 @@ pub(super) fn round6(x: f64) -> f64 {
     (x * 1e6).round() / 1e6
 }
 
-fn line_ends(sk: &Sketch, l: usize) -> (PointIdx, PointIdx) {
-    match sk.curves.get(l).map(|c| &c.kind) {
+fn line_ends(sk: &Sketch, l: CurveIdx) -> (PointIdx, PointIdx) {
+    match sk.curve(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => (*a, *b),
         _ => (PointIdx::ORIGIN, PointIdx::ORIGIN),
     }
@@ -2707,15 +2709,15 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let want = bool_(p, "value");
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
-        let cs: Vec<usize> =
+        let cs: Vec<CurveIdx> =
             ids.iter().map(|id| sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))).collect::<Result<_>>()?;
         // The selection switches together (a slot or polygon as a whole): to construction
         // unless all of it already is. Projected curves may switch too. A centerline that
         // becomes construction stops being a centerline (one line type at a time).
-        let to = want.unwrap_or_else(|| !cs.iter().all(|c| sk.curves.get(*c).is_some_and(|c| c.construction)));
+        let to = want.unwrap_or_else(|| !cs.iter().all(|c| sk.curve(*c).is_some_and(|c| c.construction)));
         let mut n = 0;
         for c in cs {
-            if let Some(cu) = sk.curves.get_mut(c)
+            if let Some(cu) = sk.curve_mut(c)
                 && (cu.construction != to || to && cu.centerline || !to && cu.infinite)
             {
                 cu.construction = to;
@@ -2768,7 +2770,9 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             .curves
             .iter()
             .enumerate()
-            .filter(|(index, curve)| selected_curves.contains(index) || curve.kind.point_ids().iter().any(|point| selected_points.contains(point)))
+            .filter(|(index, curve)| {
+                selected_curves.contains(&CurveIdx(*index)) || curve.kind.point_ids().iter().any(|point| selected_points.contains(point))
+            })
             .map(|(_, curve)| curve.id.as_str())
             .collect::<std::collections::BTreeSet<_>>();
         for offset in &sk.offsets {

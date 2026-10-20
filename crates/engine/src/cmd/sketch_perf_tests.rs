@@ -28,7 +28,7 @@ fn big(n: usize) -> Session {
             .iter()
             .map(|(dx, dy)| sk.add_point(Vec2::new(x + dx, y + dy), None).unwrap())
             .collect();
-        let l: Vec<usize> = (0..4).map(|i| sk.add_line_pts(p[i], p[(i + 1) % 4], None).unwrap()).collect();
+        let l: Vec<solidcraft_sketch::CurveIdx> = (0..4).map(|i| sk.add_line_pts(p[i], p[(i + 1) % 4], None).unwrap()).collect();
         sk.add_constraint(Horizontal { l: l[0] }, None).unwrap();
         sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
         sk.add_constraint(Vertical { l: l[1] }, None).unwrap();

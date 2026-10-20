@@ -523,7 +523,7 @@ pub(super) fn sheet_eval(
                     .enumerate()
                     .filter(|(_, c)| !c.construction)
                     .flat_map(|(ci, c)| {
-                        ss.sketch.segs(ci).into_iter().filter_map(move |sg| match sg {
+                        ss.sketch.segs(solidcraft_sketch::CurveIdx(ci)).into_iter().filter_map(move |sg| match sg {
                             Seg2::Line { a, b } => Some((c.id.clone(), a, b)),
                             _ => None,
                         })

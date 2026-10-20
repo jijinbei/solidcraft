@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, CurveKind};
+use solidcraft_sketch::{ConstraintKind, CurveIdx, CurveKind};
 
 use crate::Session;
 
@@ -57,7 +57,7 @@ fn explicit_freeform_break_preserves_exact_geometry_and_undo() {
         let out = run(&mut s, "sketch.break", json!({"curve": id, "points": [b, a, a]}));
         assert!(ids(&out["curves"]).len() >= 3, "{command}: {out}");
         let after = sketch(&s);
-        let segs: Vec<_> = after.curves.iter().enumerate().flat_map(|(i, _)| after.exact_segs(i).unwrap_or_default()).collect();
+        let segs: Vec<_> = after.curves.iter().enumerate().flat_map(|(i, _)| after.exact_segs(CurveIdx(i)).unwrap_or_default()).collect();
         for old in &exact {
             for k in 0..=40 {
                 let q = old.point_at(k as f64 / 40.0);
@@ -194,12 +194,12 @@ fn exact_extend_ellipse_preserves_support_target_and_history() {
         run(&mut s, "sketch.constraint.fix", json!({"entity":ellipse}));
         let line = ids(&run(&mut s, "sketch.line", json!({"points":[[0,y],[5,y]],"connect":false,"infer":false}))["curves"])[0].clone();
         let before = s.doc.to_json();
-        let target = sketch(&s).exact_segs(0).unwrap();
+        let target = sketch(&s).exact_segs(CurveIdx(0)).unwrap();
         run(&mut s, "sketch.extend", json!({"curve":line,"at":[5,y]}));
         let sk = sketch(&s);
         let end = sk.point(sk.resolve_point(&format!("{line}.end")).unwrap()).unwrap();
         assert!(end.dist(Vec2::new(expected_x, y)) < 1e-7, "exact ellipse contact {end:?}");
-        assert_eq!(sk.exact_segs(0).unwrap(), target);
+        assert_eq!(sk.exact_segs(CurveIdx(0)).unwrap(), target);
         let persisted = s.doc.to_json();
         let reopened = solidcraft_doc::format::read(&persisted).unwrap();
         assert_eq!(reopened.to_json(), persisted);
@@ -359,7 +359,8 @@ fn a_tangent_arc_starts_from_a_trimmed_end() {
     let sk = sketch(&s);
     let picked = sk.resolve_point("guide_a.end").unwrap();
     assert!(sk.point(picked).unwrap().dist(Vec2::new(10.0, 0.0)) < 1e-6);
-    let trimmed = sk.curves.iter().position(|cu| !cu.construction && matches!(cu.kind, CurveKind::Arc { .. })).expect("the trimmed arc");
+    let trimmed =
+        sk.curves.iter().position(|cu| !cu.construction && matches!(cu.kind, CurveKind::Arc { .. })).map(CurveIdx).expect("the trimmed arc");
     let r = run(&mut s, "sketch.arc.tangent", json!({"start": "guide_a.end", "end": [14, 6]}));
     let sk = sketch(&s);
     let a = sk.curve_index(&ids(&r["curves"])[0]).unwrap();
@@ -879,10 +880,10 @@ fn fillet_a_corner_a_construction_diagonal_ends_in() {
     assert!(c.dist(Vec2::new(48.0, 2.0)) < 1e-6, "{c:?}");
     // The diagonal still runs from (0, 30) to the sharp corner (50, 0).
     let di = sk.curve_index(&diag).unwrap();
-    let Some(CurveKind::Line { a, b }) = sk.curves.get(di).map(|x| &x.kind) else { panic!("the diagonal is a line") };
+    let Some(CurveKind::Line { a, b }) = sk.curve(di).map(|x| &x.kind) else { panic!("the diagonal is a line") };
     let (pa, pb) = (sk.point(*a).unwrap(), sk.point(*b).unwrap());
     assert!(pa.dist(Vec2::new(0.0, 30.0)) < 1e-6 && pb.dist(Vec2::new(50.0, 0.0)) < 1e-6, "{pa:?} {pb:?}");
-    assert!(sk.curves.get(di).unwrap().construction);
+    assert!(sk.curve(di).unwrap().construction);
     // Three lines at a corner, none of them construction, stay ambiguous.
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [50, 0], [50, 30]], "ids": ["a", "b"]}));
@@ -1011,7 +1012,7 @@ fn irregular_closed_spline_offset_certificate_edits_undoes_and_reopens() {
         let index = sk.curve_index(&output).unwrap();
         assert_eq!(sk.curves[index].kind.point_ids(), point_ids);
         assert!(matches!(sk.curves[index].kind, CurveKind::Spline { periodic: true, .. }));
-        let exact = sk.exact_segs(0).unwrap();
+        let exact = sk.exact_segs(CurveIdx(0)).unwrap();
         let fitted = sk.exact_segs(index).unwrap();
         let mut max_error = 0.0_f64;
         for curve in &fitted {
@@ -1443,7 +1444,7 @@ fn offset_both_sides_of_a_rounded_boundary_keep_separate_associations() {
         let mut r: Vec<f64> = curves
             .iter()
             .filter_map(|id| {
-                let CurveKind::Arc { c, a, .. } = sk.curves.get(sk.curve_index(id)?)?.kind else { return None };
+                let CurveKind::Arc { c, a, .. } = sk.curve(sk.curve_index(id)?)?.kind else { return None };
                 Some(sk.point(c)?.dist(sk.point(a)?))
             })
             .collect();
@@ -1469,7 +1470,7 @@ fn offset_both_sides_of_a_circle_are_concentric() {
     // Symmetric by 3 on a 10 mm circle: a 7 mm circle and a 13 mm one, both about the centre.
     let o = run(&mut s, "sketch.offset", json!({"curves": [c], "distance": 3, "symmetric": true}));
     let sk = sketch(&s);
-    let radius = |id: &str| match sk.curves.get(sk.curve_index(id).unwrap()).unwrap().kind {
+    let radius = |id: &str| match sk.curve(sk.curve_index(id).unwrap()).unwrap().kind {
         CurveKind::Circle { c, r } => (sk.point(c).unwrap(), r),
         _ => panic!("not a circle"),
     };
@@ -1886,7 +1887,10 @@ fn trim_piece_is_what_a_trim_there_takes_away() {
         assert!(near(mid, inside), "{at:?}: {mid:?}");
         run(&mut s, "sketch.trim", json!({"curve": curve, "at": at}));
         let sk = sketch(&s);
-        assert!(!(0..sk.curves.len()).filter_map(|i| sk.shape(i)).any(|sh| sh.dist(mid) < 1e-6), "the trim at {at:?} took the piece shown away");
+        assert!(
+            !(0..sk.curves.len()).filter_map(|i| sk.shape(CurveIdx(i))).any(|sh| sh.dist(mid) < 1e-6),
+            "the trim at {at:?} took the piece shown away"
+        );
     }
     let mut s = new_sketch();
     let lone = ids(&run(&mut s, "sketch.line", json!({"points": [[0,0], [8,0]], "connect": false}))["curves"])[0].clone();

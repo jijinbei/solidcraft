@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ConstraintKind, solve};
+use crate::{ConstraintKind, CurveIdx, solve};
 
 fn square(size: f64) -> Vec<LinkGeom> {
     let pts = [Vec2::new(-size, -size), Vec2::new(size, -size), Vec2::new(size, size), Vec2::new(-size, size)];
@@ -143,7 +143,7 @@ fn resized_dense_rim_matches_arc_centres_by_role_before_proximity() {
         out
     };
     let link = sk.add_link(LinkKind::Project, face(), &geometry(38.0, -26.5)).unwrap();
-    let arcs: Vec<usize> = sk.link_curves(&link).into_iter().filter(|i| matches!(sk.curves[*i].kind, CurveKind::Arc { .. })).collect();
+    let arcs: Vec<CurveIdx> = sk.link_curves(&link).into_iter().filter(|i| matches!(sk.curves[*i].kind, CurveKind::Arc { .. })).collect();
     let ids: Vec<String> = arcs.iter().map(|i| sk.curves[*i].id.clone()).collect();
     // The old centre is spatially closer in normalized space to a fresh endpoint.
     // Both semicircles must still keep the same shared centre and logical endpoints.

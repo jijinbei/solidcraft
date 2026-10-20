@@ -4,7 +4,7 @@
 //! bounds their distance everywhere, rather than just at selected samples. At the
 //! node limit, interior splits align the curves geometrically instead of requiring
 //! identical parameter speeds; stored nodes and interpolation remain unchanged.
-use crate::{CurveKind, PointIdx, Sketch, SketchError, fit_beziers_mode};
+use crate::{CurveIdx, CurveKind, PointIdx, Sketch, SketchError, fit_beziers_mode};
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Seg2, Vec2};
 
@@ -311,7 +311,7 @@ fn verify_simple(points: &[Vec2], cubics: &[[Vec2; 4]], closed: bool) -> Result<
     Ok(())
 }
 
-fn geometry(sk: &Sketch, source: usize, forward: bool, d: f64, divisions: usize, fit: Fit, work: &mut usize) -> Result<(Vec<Vec2>, usize, bool)> {
+fn geometry(sk: &Sketch, source: CurveIdx, forward: bool, d: f64, divisions: usize, fit: Fit, work: &mut usize) -> Result<(Vec<Vec2>, usize, bool)> {
     if *work == 0 {
         return Err(bad("offset transaction certificate work limit exceeded"));
     }
@@ -450,11 +450,11 @@ impl Sketch {
         }
         Ok(())
     }
-    pub fn add_freeform_offset(&mut self, source: usize, forward: bool, distance: f64) -> Result<usize> {
+    pub fn add_freeform_offset(&mut self, source: CurveIdx, forward: bool, distance: f64) -> Result<CurveIdx> {
         if self.freeform_offsets.len() >= MAX_ASSOCIATIONS {
             return Err(bad("too many associative free-form offsets"));
         }
-        let source_id = self.curves.get(source).ok_or_else(|| bad("missing offset source"))?.id.clone();
+        let source_id = self.curve(source).ok_or_else(|| bad("missing offset source"))?.id.clone();
         let source_pieces = self.exact_segs(source).ok_or_else(|| bad("offset source changed shape"))?.len();
         let mut result = None;
         let mut failure = None;
@@ -683,7 +683,7 @@ mod tests {
         assert!(certify(&stationary, &cubic, 2.0, proof, 0, &mut budget).is_err());
     }
 
-    fn ellipse() -> (Sketch, usize) {
+    fn ellipse() -> (Sketch, CurveIdx) {
         let mut sketch = Sketch::new();
         let center = sketch.add_point(Vec2::ZERO, None).unwrap();
         let major = sketch.add_point(Vec2::new(10.0, 0.0), None).unwrap();
@@ -874,7 +874,7 @@ mod tests {
                             let exact = normal_point(piece, (j as f64 + t) / record.divisions as f64, record.distance).unwrap();
                             let got = sk.exact_segs(output).unwrap()[i * record.divisions + j].point_at(t);
                             assert!(got.dist(exact) <= OFFSET_TOLERANCE);
-                            if source == 0 {
+                            if source == CurveIdx(0) {
                                 // Independent ellipse implicit-gradient normal, rather
                                 // than using the offset implementation as its own oracle.
                                 let base = piece.point_at((j as f64 + t) / record.divisions as f64);

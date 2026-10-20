@@ -603,7 +603,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 fn first_point(sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind) -> Option<solidcraft_engine::sketch::PointIdx> {
     use ConstraintKind::*;
     match *k {
-        Length { l, .. } => sk.curves.get(l).and_then(|c| c.kind.point_ids().first().copied()),
+        Length { l, .. } => sk.curve(l).and_then(|c| c.kind.point_ids().first().copied()),
         Distance { p, .. } | DistanceX { p, .. } | DistanceY { p, .. } | PointLineDistance { p, .. } | LinearDiameter { p, .. } => Some(p),
         _ => None,
     }
@@ -1067,33 +1067,46 @@ mod tests {
 
     #[test]
     fn inch_labels_convert_all_lengths_preserve_four_digits_and_leave_angles_alone() {
-        let length = ConstraintKind::Length { l: 0, value: 25.4 };
+        let length = ConstraintKind::Length { l: solidcraft_engine::sketch::CurveIdx(0), value: 25.4 };
         assert_eq!(label(&length, Some("25.4 mm"), false, "in", 2), "1.000");
         assert_eq!(label(&length, Some("1 in"), false, "in", 2), "1.000");
         assert_eq!(label(&length, Some("1.0000 in"), false, "in", 2), "1.0000");
-        let radius = ConstraintKind::Radius { c: 0, value: 1.2345 * 25.4 };
+        let radius = ConstraintKind::Radius { c: solidcraft_engine::sketch::CurveIdx(0), value: 1.2345 * 25.4 };
         assert_eq!(label(&radius, Some("1.2345 in"), false, "in", 2), "R1.2345");
         assert_eq!(label(&radius, Some("width / 2"), true, "in", 2), "(fx: R1.2345)");
-        let diameter = ConstraintKind::Diameter { c: 0, value: 0.001 * 25.4 };
+        let diameter = ConstraintKind::Diameter { c: solidcraft_engine::sketch::CurveIdx(0), value: 0.001 * 25.4 };
         assert_eq!(label(&diameter, None, false, "in", 2), "Ø0.001");
         assert_eq!(crate::prefs::length_number(25.4 * (1.0 + 1e-12), "in", 2), "1.000");
         assert_eq!(crate::prefs::length_number(25.4, "in", 5), "1.00000");
         assert_eq!(crate::prefs::length_number(25.4, "cm", 2), "2.54");
-        let angle = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_4, flip: false };
+        let angle = ConstraintKind::Angle {
+            a: solidcraft_engine::sketch::CurveIdx(0),
+            b: solidcraft_engine::sketch::CurveIdx(1),
+            value: std::f64::consts::FRAC_PI_4,
+            flip: false,
+        };
         assert_eq!(label(&angle, Some("45 deg"), false, "in", 2), "45.0°");
     }
 
     #[test]
     fn labels_show_the_value_or_fx() {
-        let k = ConstraintKind::Length { l: 0, value: 25.0 };
+        let k = ConstraintKind::Length { l: solidcraft_engine::sketch::CurveIdx(0), value: 25.0 };
         assert_eq!(label(&k, Some("25 mm"), false, "mm", 2), "25.00");
         assert_eq!(label(&k, Some("width * 2"), false, "mm", 2), "fx: 25.00");
         // A value typed with a decimal comma is a plain value too (#1347).
-        assert_eq!(label(&ConstraintKind::Length { l: 0, value: 25.5 }, Some("25,5 mm"), false, "mm", 2), "25.50");
+        assert_eq!(
+            label(&ConstraintKind::Length { l: solidcraft_engine::sketch::CurveIdx(0), value: 25.5 }, Some("25,5 mm"), false, "mm", 2),
+            "25.50"
+        );
         assert_eq!(label(&k, None, true, "mm", 2), "(25.00)");
-        assert_eq!(label(&ConstraintKind::Radius { c: 0, value: 5.0 }, Some("5 mm"), false, "mm", 2), "R5.00");
-        assert_eq!(label(&ConstraintKind::Diameter { c: 0, value: 10.0 }, Some("10"), false, "mm", 2), "Ø10.00");
-        let a = ConstraintKind::Angle { a: 0, b: 1, value: std::f64::consts::FRAC_PI_4, flip: false };
+        assert_eq!(label(&ConstraintKind::Radius { c: solidcraft_engine::sketch::CurveIdx(0), value: 5.0 }, Some("5 mm"), false, "mm", 2), "R5.00");
+        assert_eq!(label(&ConstraintKind::Diameter { c: solidcraft_engine::sketch::CurveIdx(0), value: 10.0 }, Some("10"), false, "mm", 2), "Ø10.00");
+        let a = ConstraintKind::Angle {
+            a: solidcraft_engine::sketch::CurveIdx(0),
+            b: solidcraft_engine::sketch::CurveIdx(1),
+            value: std::f64::consts::FRAC_PI_4,
+            flip: false,
+        };
         assert_eq!(label(&a, Some("45 deg"), false, "mm", 2), "45.0°");
     }
 }

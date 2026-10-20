@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
+use solidcraft_sketch::CurveIdx;
 
 use crate::Session;
 
@@ -672,7 +673,7 @@ fn midpoint_alignment_remaps_after_unrelated_geometry_is_deleted() {
     let helper = sk.point(sk.resolve_point(result["created"]["points"][0].as_str().unwrap()).unwrap()).unwrap();
     assert!(helper.dist(line_midpoint(&sk, "l2")) < 1e-6);
     assert!((sk.point(sk.resolve_point("target").unwrap()).unwrap().x - helper.x).abs() < 1e-6);
-    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l: 0, .. })));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l: CurveIdx(0), .. })));
     // Deleting the helper itself removes its H/V and Midpoint relationships.
     run(&mut s, "sketch.delete", json!({"entities":[result["created"]["points"][0]]}));
     assert!(sketch(&s).constraints.is_empty());

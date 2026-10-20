@@ -877,7 +877,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             Sel::SketchCurve { id } => {
                 picked.push(id.clone());
                 curves.push(id.clone());
-                match ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i)).map(|c| &c.kind) {
+                match ss.sketch.curve_index(id).and_then(|i| ss.sketch.curve(i)).map(|c| &c.kind) {
                     Some(CurveKind::Line { .. }) => lines.push(id.clone()),
                     Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }) => rounds.push(id.clone()),
                     _ => {}
@@ -929,7 +929,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         .filter(|id| {
             ss.sketch
                 .curve_index(id)
-                .and_then(|i| ss.sketch.curves.get(i))
+                .and_then(|i| ss.sketch.curve(i))
                 .is_some_and(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }))
         })
         .cloned()

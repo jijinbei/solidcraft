@@ -506,7 +506,7 @@ fn hostile_input_neither_panics_nor_changes_the_report() {
     let push = |sk: &mut Sketch, kind: ConstraintKind| {
         sk.constraints.push(Constraint { id: format!("h{}", sk.constraints.len()), kind, param: None, driven: false, text: None })
     };
-    let cases: Vec<Box<dyn Fn(&mut Sketch, PointIdx, PointIdx, usize)>> = vec![
+    let cases: Vec<Box<dyn Fn(&mut Sketch, PointIdx, PointIdx, CurveIdx)>> = vec![
         Box::new(|sk, _, _, _| sk.constraints[1].kind.set_value(f64::NAN)),
         Box::new(|sk, _, _, _| sk.constraints[2].kind.set_value(f64::INFINITY)),
         Box::new(|sk, _, _, _| sk.constraints[3].kind.set_value(1e300)),
@@ -517,7 +517,7 @@ fn hostile_input_neither_panics_nor_changes_the_report() {
         Box::new(|sk, _, b, _| sk.points[b].pos = v(1e300, -1e300)),
         Box::new(move |sk, _, b, _| push(sk, ConstraintKind::Distance { p: b, q: PointIdx(999), value: 3.0 })),
         Box::new(move |sk, a, _, _| push(sk, ConstraintKind::DistanceX { p: a, q: PointIdx(usize::MAX), value: 3.0 })),
-        Box::new(move |sk, _, _, _| push(sk, ConstraintKind::Horizontal { l: 77 })),
+        Box::new(move |sk, _, _, _| push(sk, ConstraintKind::Horizontal { l: CurveIdx(77) })),
         Box::new(move |sk, _, b, _| push(sk, ConstraintKind::Coincident { p: b, q: b })),
         Box::new(move |sk, _, _, l| push(sk, ConstraintKind::Length { l, value: f64::NAN })),
         Box::new(move |sk, a, b, _| push(sk, ConstraintKind::DistanceY { p: a, q: b, value: f64::NEG_INFINITY })),
@@ -532,7 +532,7 @@ fn hostile_input_neither_panics_nor_changes_the_report() {
         assert!(s.pos.iter().flatten().all(|p| p.is_finite()), "case {i}: {s:?}");
         let n = sk.points.len();
         for reference in [None, Some(vec![Vec2::ZERO; 1]), Some(vec![v(f64::NAN, f64::INFINITY); n]), Some(vec![Vec2::ZERO; n + 3])] {
-            let hold = Hold { points: vec![PointIdx(usize::MAX)], radii: vec![usize::MAX] };
+            let hold = Hold { points: vec![PointIdx(usize::MAX)], radii: vec![CurveIdx(usize::MAX)] };
             let mut t = sk.clone();
             match &reference {
                 Some(r) => solve_with(&mut t, &hold, Some(r), Analysis::Full, None),
