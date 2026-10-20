@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
 use solidcraft_io::{Geom2, MAX_DRAWING_BYTES};
-use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, PointIdx, Sketch};
 
 use super::CommandSpec;
 use super::sketch::{edit, ids_of};
@@ -42,8 +42,8 @@ fn source_text(p: &Value, cmd: &str) -> Result<String> {
 /// Adds the geometry; end points closer than `q` (mm) become one point, so drawings whose
 /// ends almost meet still make closed profiles.
 fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
-    let mut map: HashMap<(i64, i64), Vec<(Vec2, usize)>> = HashMap::new();
-    let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<usize> {
+    let mut map: HashMap<(i64, i64), Vec<(Vec2, PointIdx)>> = HashMap::new();
+    let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<PointIdx> {
         let p = f(p);
         let key = ((p.x / q).floor() as i64, (p.y / q).floor() as i64);
         for dx in -1..=1 {
@@ -178,7 +178,8 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
         if c.construction {
             continue;
         }
-        let pt = |k: usize| sk.point(k).unwrap_or_default();
+        let pt = |k: PointIdx| sk.point(k).unwrap_or_default();
+
         match &c.kind {
             CurveKind::Line { a, b } => geom.push(Geom2::Line(pt(*a), pt(*b))),
             CurveKind::Circle { c, r } => geom.push(Geom2::Circle(pt(*c), *r)),

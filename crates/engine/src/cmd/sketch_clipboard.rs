@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use solidcraft_geom::{Aabb2, Vec2};
-use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, PointIdx, Sketch};
 
 use super::sketch::{edit, target_sketch};
 use super::{CommandSpec, in_sketch};
@@ -61,7 +61,7 @@ pub struct SketchClip {
     /// a clipboard curve.
     pub texts: Vec<(LinkSource, Option<usize>)>,
     /// Lone points (not used by a copied curve), as indices into `points`.
-    pub lone: Vec<usize>,
+    pub lone: Vec<PointIdx>,
     /// Centre of the copied geometry's bounding box: what `at` places.
     pub center: Vec2,
     /// Size of the bounding box (the larger side), for the paste offset.
@@ -97,7 +97,7 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "select the sketch curves or points to copy"));
     }
     let sk = s.doc.sketch(id)?;
-    let (mut cs, mut ps, mut texts): (Vec<usize>, Vec<usize>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut cs, mut ps, mut texts): (Vec<usize>, Vec<PointIdx>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
     for e in &ids {
         if let Some(c) = sk.curve_index(e) {
             match text_of(sk, c) {
@@ -107,7 +107,7 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
                 None => {}
             }
         } else if let Some(q) = sk.resolve_point(e) {
-            match sk.points.get(q).and_then(|x| x.link.as_deref()).and_then(|l| sk.link(l)).filter(|l| l.kind == LinkKind::Text) {
+            match sk.spoint(q).and_then(|x| x.link.as_deref()).and_then(|l| sk.link(l)).filter(|l| l.kind == LinkKind::Text) {
                 Some(l) if !texts.contains(&l.id) => texts.push(l.id.clone()),
                 Some(_) => {}
                 None if !ps.contains(&q) => ps.push(q),
@@ -119,18 +119,18 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut clip = SketchClip { sketch: id, ..Default::default() };
     // Points: those of the copied curves, then the lone ones, each once.
-    let mut pmap: BTreeMap<usize, usize> = BTreeMap::new();
-    let take = |q: usize, clip: &mut SketchClip, pmap: &mut BTreeMap<usize, usize>| -> usize {
+    let mut pmap: BTreeMap<PointIdx, PointIdx> = BTreeMap::new();
+    let take = |q: PointIdx, clip: &mut SketchClip, pmap: &mut BTreeMap<PointIdx, PointIdx>| -> PointIdx {
         *pmap.entry(q).or_insert_with(|| {
             clip.points.push(sk.point(q).unwrap_or_default());
-            clip.points.len() - 1
+            PointIdx(clip.points.len() - 1)
         })
     };
     let mut cmap: BTreeMap<usize, usize> = BTreeMap::new();
     for &c in &cs {
         let Some(cu) = sk.curves.get(c) else { continue };
         let mut kind = cu.kind.clone();
-        let used: Vec<(usize, usize)> = kind.point_ids().into_iter().map(|q| (q, take(q, &mut clip, &mut pmap))).collect();
+        let used: Vec<(PointIdx, PointIdx)> = kind.point_ids().into_iter().map(|q| (q, take(q, &mut clip, &mut pmap))).collect();
         kind.map_points(&|q| used.iter().find(|(o, _)| *o == q).map_or(q, |(_, n)| *n));
         cmap.insert(c, clip.curves.len());
         // Projected geometry comes in as ordinary geometry.
@@ -185,7 +185,7 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
         sk.polyline(c).into_iter().for_each(&mut add);
     }
     for &n in &clip.lone {
-        if let Some(q) = clip.points.get(n) {
+        if let Some(q) = clip.points.get(n.0) {
             add(*q);
         }
     }
@@ -272,7 +272,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         let mut made = Vec::with_capacity(clip.curves.len());
         for c in &clip.curves {
             let mut kind = c.kind.clone();
-            kind.map_points(&|q| pts.get(q).copied().unwrap_or(usize::MAX));
+            kind.map_points(&|q| pts.get(q.0).copied().unwrap_or(PointIdx(usize::MAX)));
             let i = sk.add_curve(kind, None)?;
             if let Some(cu) = sk.curves.get_mut(i) {
                 cu.construction = c.construction;
@@ -285,7 +285,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         let mut cons = Vec::new();
         for c in &clip.constraints {
             let mut kind = c.kind.clone();
-            if !kind.remap(&|q| pts.get(q).copied(), &|k| made.get(k).copied()) {
+            if !kind.remap(&|q| pts.get(q.0).copied(), &|k| made.get(k).copied()) {
                 continue;
             }
             // Each pasted dimension gets its own parameter, with the same expression.
@@ -310,7 +310,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             let link = sk.add_link(LinkKind::Text, src, &geom)?;
             curve_ids.extend(sk.link_curves(&link).into_iter().filter_map(|i| sk.curves.get(i).map(|c| c.id.clone())));
         }
-        let lone: Vec<String> = clip.lone.iter().filter_map(|n| pts.get(*n)).filter_map(|i| sk.points.get(*i).map(|q| q.id.clone())).collect();
+        let lone: Vec<String> = clip.lone.iter().filter_map(|n| pts.get(n.0)).filter_map(|i| sk.spoint(*i).map(|q| q.id.clone())).collect();
         Ok((curve_ids, lone, cons))
     })?;
     if !positioned

@@ -34,7 +34,7 @@
 
 use solidcraft_geom::Vec2;
 
-use crate::model::{ConstraintKind, CurveKind, MAX_COORD, Sketch, in_range, radius_in_range};
+use crate::model::{ConstraintKind, CurveKind, MAX_COORD, PointIdx, Sketch, in_range, radius_in_range};
 use crate::union_find::{find, union};
 
 /// Two intersections closer than this (relative to the size of the loci: radii, centre
@@ -766,8 +766,8 @@ fn levels(lines: &[Option<(usize, usize)>], cons: &[&ConstraintKind]) -> Vec<Opt
 fn round_of(sk: &Sketch, k: usize) -> Option<Round> {
     let n = sk.points.len();
     match sk.curves.get(k)?.kind {
-        CurveKind::Circle { c, .. } if c < n => Some(Round { c, ends: None }),
-        CurveKind::Arc { c, a, b } if c < n && a < n && b < n && c != a && c != b => Some(Round { c, ends: Some((a, b)) }),
+        CurveKind::Circle { c, .. } if c.0 < n => Some(Round { c: c.0, ends: None }),
+        CurveKind::Arc { c, a, b } if c.0 < n && a.0 < n && b.0 < n && c != a && c != b => Some(Round { c: c.0, ends: Some((a.0, b.0)) }),
         _ => None,
     }
 }
@@ -812,7 +812,7 @@ fn direction(ends: Option<(usize, usize)>, pos: &dyn Fn(usize) -> Option<Vec2>) 
 /// Every constraint on a line is read as a tie; a tie on a horizontal or vertical line is
 /// then lowered to the relations between two points it amounts to (a row, a column, an offset
 /// across it), which the decomposition builds clusters on.
-pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve: &[(usize, usize)], radius: &[Option<f64>]) -> Reading {
+pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve: &[(PointIdx, usize)], radius: &[Option<f64>]) -> Reading {
     use ConstraintKind::*;
     let n = sk.points.len();
     let m = sk.curves.len();
@@ -822,7 +822,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
         .curves
         .iter()
         .map(|c| match c.kind {
-            CurveKind::Line { a, b } if a < n && b < n && a != b => Some((a, b)),
+            CurveKind::Line { a, b } if a.0 < n && b.0 < n && a != b => Some((a.0, b.0)),
             _ => None,
         })
         .collect();
@@ -857,9 +857,9 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     };
     for k in &cons {
         match **k {
-            Coincident { p, q } => rel(p, q, Rel::Same),
-            HorizontalPoints { p, q } => rel(p, q, Rel::SameY),
-            VerticalPoints { p, q } => rel(p, q, Rel::SameX),
+            Coincident { p, q } => rel(p.0, q.0, Rel::Same),
+            HorizontalPoints { p, q } => rel(p.0, q.0, Rel::SameY),
+            VerticalPoints { p, q } => rel(p.0, q.0, Rel::SameX),
             Distance { p, q, value } | DistanceX { p, q, value } | DistanceY { p, q, value } => {
                 if let Some(d) = dim(value) {
                     let r = match **k {
@@ -867,10 +867,11 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                         DistanceY { .. } => Rel::OffsetY(d),
                         _ => Rel::Dist(d),
                     };
-                    rel(p, q, r);
+                    rel(p.0, q.0, r);
                 }
             }
-            PointOnCurve { p, c } if p < n => {
+            PointOnCurve { p, c } if p.0 < n => {
+                let p = p.0;
                 if line(c).is_some() {
                     ties.push(Tie::OnLine { p, l: c });
                 } else if let Some(rd) = round(c) {
@@ -881,10 +882,10 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                     }
                 }
             }
-            PointLineDistance { p, l, value } | LinearDiameter { p, l, value } if p < n && line(l).is_some() => {
+            PointLineDistance { p, l, value } | LinearDiameter { p, l, value } if p.0 < n && line(l).is_some() => {
                 let d = if matches!(**k, LinearDiameter { .. }) { value / 2.0 } else { value };
                 if let Some(d) = dim(d) {
-                    ties.push(Tie::Offset { p, l, len: Len::Value(d) });
+                    ties.push(Tie::Offset { p: p.0, l, len: Len::Value(d) });
                 }
             }
             // The centre lies radius ± the gap from the line, on its side in the reference.
@@ -904,7 +905,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                         ties.push(Tie::Offset { p: rd.c, l, len });
                     }
                     // The radius to the touch point is normal to the line.
-                    if let Some(e) = crate::solver::touch_point(sk, k, on_curve).filter(|e| *e < n && *e != rd.c) {
+                    if let Some(e) = crate::solver::touch_point(sk, k, on_curve).map(|e| e.0).filter(|e| *e < n && *e != rd.c) {
                         ties.push(Tie::Normal { p: rd.c, e, l });
                     }
                 } else if let (Some(r1), Some(r2), Some(k1), Some(k2)) = (r_of(a), r_of(b), round(a), round(b)) {
@@ -933,15 +934,16 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
                     rel(k1.c, k2.c, Rel::Dist(d));
                 }
             }
-            Midpoint { p, l } if p < n => {
+            Midpoint { p, l } if p.0 < n => {
+                let p = p.0;
                 if let Some((a, b)) = line(l).filter(|(a, b)| p != *a && p != *b) {
                     ties.push(Tie::OnLine { p, l });
                     ties.push(Tie::Midpoint { p, a, b });
                 }
             }
-            Symmetric { p, q, l } if p < n && q < n && p != q && line(l).is_some() => {
-                ties.push(Tie::Normal { p, e: q, l });
-                ties.push(Tie::Mirror { p, q, l });
+            Symmetric { p, q, l } if p.0 < n && q.0 < n && p != q && line(l).is_some() => {
+                ties.push(Tie::Normal { p: p.0, e: q.0, l });
+                ties.push(Tie::Mirror { p: p.0, q: q.0, l });
             }
             Collinear { a, b } => {
                 if let (Some((a0, a1)), Some((b0, b1))) = (line(a), line(b)) {

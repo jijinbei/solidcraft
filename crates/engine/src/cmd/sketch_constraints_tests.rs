@@ -161,7 +161,7 @@ fn internal_freedom_queries_skip_redundancy_and_keep_constraint_acceptance() {
 
     let mut sk = Sketch::new();
     let q = sk.add_point(Vec2::new(10.0, 2.0), None).unwrap();
-    let k = ConstraintKind::Distance { p: 0, q, value: 10.0 };
+    let k = ConstraintKind::Distance { p: solidcraft_sketch::PointIdx::ORIGIN, q, value: 10.0 };
     sk.add_constraint(k.clone(), None).unwrap();
     let redundant = sk.add_constraint(k.clone(), None).unwrap();
     let (dof, profile) = capture(|| super::dof_now(&sk));
@@ -175,7 +175,9 @@ fn internal_freedom_queries_skip_redundancy_and_keep_constraint_acceptance() {
     assert_eq!(sk, before);
     assert_eq!(profile.counters.redundancy_checks, 0);
 
-    let (accepted, profile) = capture(|| super::try_add(&mut sk, &mut doc, ConstraintKind::DistanceX { p: 0, q, value: 6.0 }, dof, false));
+    let (accepted, profile) = capture(|| {
+        super::try_add(&mut sk, &mut doc, ConstraintKind::DistanceX { p: solidcraft_sketch::PointIdx::ORIGIN, q, value: 6.0 }, dof, false)
+    });
     assert_eq!(accepted, Some(0));
     assert_eq!(profile.counters.redundancy_checks, 0);
     let full = solidcraft_sketch::solve(&mut sk);

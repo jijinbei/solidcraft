@@ -9,7 +9,7 @@ use crate::*;
 
 /// A fixed line along x from (0, 0) to (40, 0) and a circle of radius `r` at `centre` (its
 /// centre free, its radius set by a dimension). The line, the circle and the centre point.
-fn line_and_circle(centre: Vec2, r: f64) -> (Sketch, usize, usize, usize) {
+fn line_and_circle(centre: Vec2, r: f64) -> (Sketch, usize, usize, PointIdx) {
     let mut sk = Sketch::new();
     let l = sk.add_line(v(0.0, 0.0), v(40.0, 0.0), None, None, None).unwrap();
     let (a, b) = sk.curves[l].kind.ends().unwrap();
@@ -127,8 +127,8 @@ fn the_seed_places_the_centre_by_construction() {
         sk.add_constraint(ConstraintKind::DistanceX { p: a, q: ci, value: 20.0 }, None).unwrap();
         sk.add_constraint(ConstraintKind::LineCircleDistance { l, c, value, inside }, None).unwrap();
         let out = crate::tests::seed_of(&sk);
-        assert!(out.placed_by[ci].is_some_and(crate::construct::Placement::anchors), "{out:?}");
-        assert!(out.pos[ci].unwrap().dist(want) < 1e-9, "{out:?}");
+        assert!(out.placed_by[ci.0].is_some_and(crate::construct::Placement::anchors), "{out:?}");
+        assert!(out.pos[ci.0].unwrap().dist(want) < 1e-9, "{out:?}");
         let rep = solve(&mut sk);
         assert!(rep.ok() && rep.dof == 0, "{rep:?}");
         assert!(sk.points[ci].pos.dist(want) < 1e-9, "{:?}", sk.points[ci].pos);

@@ -162,7 +162,7 @@ pub fn chain_centres(sk: &Sketch) -> Vec<Vec2> {
     for c in &sk.curves {
         let ids = c.kind.point_ids();
         for w in ids.windows(2) {
-            union(&mut parent, w[0], w[1]);
+            union(&mut parent, w[0].0, w[1].0);
         }
     }
     let mut sum = vec![(Vec2::ZERO, 0usize); n];
@@ -398,6 +398,7 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::PointIdx;
 
     fn close(a: Vec2, b: Vec2) -> bool {
         a.dist(b) < 1e-9
@@ -483,7 +484,7 @@ mod tests {
     fn angle_frame_uses_the_rays_toward_the_lines() {
         let mut sk = Sketch::new();
         let a = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), None, None, None).unwrap_or(0);
-        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(0.0, 10.0), Some(1), None, None).unwrap_or(0);
+        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(0.0, 10.0), Some(PointIdx(1)), None, None).unwrap_or(0);
         let k = ConstraintKind::Angle { a, b, value: std::f64::consts::FRAC_PI_2, flip: false };
         let Some(DimFrame::Angular { vertex, d0, sweep }) = dim_frame(&sk, &k) else { panic!("no frame") };
         assert!(close(vertex, Vec2::ZERO) && close(d0, Vec2::X));
@@ -520,7 +521,7 @@ mod tests {
         // A point that is not the end of a parallel line keeps its own extension line.
         let mut sk = Sketch::new();
         let l = sk.add_line(Vec2::new(0.0, -100.0), Vec2::new(0.0, 100.0), None, None, None).unwrap_or(0);
-        let q = sk.add_point(Vec2::new(30.0, -80.0), None).unwrap_or(0);
+        let q = sk.add_point(Vec2::new(30.0, -80.0), None).unwrap_or(PointIdx::ORIGIN);
         assert!(dim_reach(&sk, &ConstraintKind::PointLineDistance { p: q, l, value: 30.0 })[1].is_none());
     }
 }

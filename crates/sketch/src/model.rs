@@ -138,18 +138,18 @@ impl PointExprs {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CurveKind {
     /// Segment between two points (indices into `Sketch::points`).
-    Line { a: usize, b: usize },
+    Line { a: PointIdx, b: PointIdx },
     /// Full circle: centre point and radius.
-    Circle { c: usize, r: f64 },
+    Circle { c: PointIdx, r: f64 },
     /// Counter-clockwise arc around `c` from `a` to `b` (radius = |a − c|; the solver keeps
     /// |b − c| equal to it).
-    Arc { c: usize, a: usize, b: usize },
+    Arc { c: PointIdx, a: PointIdx, b: PointIdx },
     /// Ellipse: centre `c`, end of the major axis `m`, minor radius `r`.
-    Ellipse { c: usize, m: usize, r: f64 },
+    Ellipse { c: PointIdx, m: PointIdx, r: f64 },
     /// Spline through its points (fit points) or, with `control`, a clamped B-spline of
     /// `degree` over them (control points).
     Spline {
-        pts: Vec<usize>,
+        pts: Vec<PointIdx>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         control: bool,
         #[serde(default = "three")]
@@ -160,7 +160,7 @@ pub enum CurveKind {
     },
     /// Conic from `a` to `b` shaped by the `apex` point and `rho` in (0, 1) (0.5 parabola,
     /// less elliptical, more hyperbolic).
-    Conic { a: usize, b: usize, apex: usize, rho: f64 },
+    Conic { a: PointIdx, b: PointIdx, apex: PointIdx, rho: f64 },
 }
 
 fn three() -> u8 {
@@ -169,7 +169,7 @@ fn three() -> u8 {
 
 impl CurveKind {
     /// Every point the curve uses.
-    pub fn point_ids(&self) -> Vec<usize> {
+    pub fn point_ids(&self) -> Vec<PointIdx> {
         match self {
             CurveKind::Line { a, b } => vec![*a, *b],
             CurveKind::Circle { c, .. } => vec![*c],
@@ -179,11 +179,11 @@ impl CurveKind {
             CurveKind::Conic { a, b, apex, .. } => vec![*a, *b, *apex],
         }
     }
-    pub fn uses(&self, p: usize) -> bool {
+    pub fn uses(&self, p: PointIdx) -> bool {
         self.point_ids().contains(&p)
     }
     /// Renumber the points the curve uses.
-    pub fn map_points(&mut self, f: &dyn Fn(usize) -> usize) {
+    pub fn map_points(&mut self, f: &dyn Fn(PointIdx) -> PointIdx) {
         match self {
             CurveKind::Line { a, b } => {
                 *a = f(*a);
@@ -212,7 +212,7 @@ impl CurveKind {
         }
     }
     /// Start and end points of an open curve.
-    pub fn ends(&self) -> Option<(usize, usize)> {
+    pub fn ends(&self) -> Option<(PointIdx, PointIdx)> {
         match self {
             CurveKind::Line { a, b } | CurveKind::Arc { a, b, .. } | CurveKind::Conic { a, b, .. } => Some((*a, *b)),
             CurveKind::Spline { periodic: true, .. } => None,
@@ -263,9 +263,9 @@ pub enum ConstraintKind {
     /// A pattern instance point is a rigid transform of its seed. Angles are radians;
     /// a circular pattern keeps its centre as a point, rather than a sampled position.
     PatternPoint {
-        p: usize,
-        q: usize,
-        center: Option<usize>,
+        p: PointIdx,
+        q: PointIdx,
+        center: Option<PointIdx>,
         angle: f64,
         offset: Vec2,
         /// Displacements along and perpendicular to live sketch lines (at most two).
@@ -278,11 +278,11 @@ pub enum ConstraintKind {
         b: usize,
     },
     Coincident {
-        p: usize,
-        q: usize,
+        p: PointIdx,
+        q: PointIdx,
     },
     PointOnCurve {
-        p: usize,
+        p: PointIdx,
         c: usize,
     },
     Horizontal {
@@ -292,12 +292,12 @@ pub enum ConstraintKind {
         l: usize,
     },
     HorizontalPoints {
-        p: usize,
-        q: usize,
+        p: PointIdx,
+        q: PointIdx,
     },
     VerticalPoints {
-        p: usize,
-        q: usize,
+        p: PointIdx,
+        q: PointIdx,
     },
     Parallel {
         a: usize,
@@ -324,35 +324,35 @@ pub enum ConstraintKind {
         b: usize,
     },
     Midpoint {
-        p: usize,
+        p: PointIdx,
         l: usize,
     },
     Symmetric {
-        p: usize,
-        q: usize,
+        p: PointIdx,
+        q: PointIdx,
         l: usize,
     },
     Fix {
-        p: usize,
+        p: PointIdx,
     },
     // Dimensions (driving).
     Distance {
-        p: usize,
-        q: usize,
+        p: PointIdx,
+        q: PointIdx,
         value: f64,
     },
     DistanceX {
-        p: usize,
-        q: usize,
+        p: PointIdx,
+        q: PointIdx,
         value: f64,
     },
     DistanceY {
-        p: usize,
-        q: usize,
+        p: PointIdx,
+        q: PointIdx,
         value: f64,
     },
     PointLineDistance {
-        p: usize,
+        p: PointIdx,
         l: usize,
         value: f64,
     },
@@ -418,7 +418,7 @@ pub enum ConstraintKind {
     },
     /// Twice the distance from point `p` to line `l` (a diameter about a centerline).
     LinearDiameter {
-        p: usize,
+        p: PointIdx,
         l: usize,
         value: f64,
     },
@@ -512,12 +512,12 @@ impl ConstraintKind {
             OffsetDistance { .. } => "OffsetDimension",
         }
     }
-    /// Does the constraint refer to point `p` (by index)?
-    pub fn refers_to_point(&self, p: usize) -> bool {
+    /// Does the constraint refer to point `p`?
+    pub fn refers_to_point(&self, p: PointIdx) -> bool {
         self.indices().0.contains(&p)
     }
     /// The points and the curves the constraint refers to.
-    pub fn indices(&self) -> (Vec<usize>, Vec<usize>) {
+    pub fn indices(&self) -> (Vec<PointIdx>, Vec<usize>) {
         use ConstraintKind::*;
         match *self {
             PatternPoint { p, q, center, directions, .. } => {
@@ -545,10 +545,10 @@ impl ConstraintKind {
     }
     /// Renumber the points and curves the constraint refers to; false when one has no new
     /// number (the constraint is then partly renumbered and should be dropped).
-    pub fn remap(&mut self, pmap: &dyn Fn(usize) -> Option<usize>, cmap: &dyn Fn(usize) -> Option<usize>) -> bool {
+    pub fn remap(&mut self, pmap: &dyn Fn(PointIdx) -> Option<PointIdx>, cmap: &dyn Fn(usize) -> Option<usize>) -> bool {
         use ConstraintKind::*;
         let mut ok = true;
-        let mut fp = |i: &mut usize| match pmap(*i) {
+        let mut fp = |i: &mut PointIdx| match pmap(*i) {
             Some(n) => *i = n,
             None => ok = false,
         };
@@ -785,14 +785,14 @@ impl Sketch {
             || self.offsets.iter().filter_map(|r| r.topology.as_ref()).any(|r| r.id == id || r.roles.iter().any(|role| role.output == id))
     }
 
-    pub fn point_index(&self, id: &str) -> Option<usize> {
-        self.points.iter().position(|p| p.id == id)
+    pub fn point_index(&self, id: &str) -> Option<PointIdx> {
+        self.points.iter().position(|p| p.id == id).map(PointIdx)
     }
     pub fn curve_index(&self, id: &str) -> Option<usize> {
         self.curves.iter().position(|c| c.id == id)
     }
-    pub fn point(&self, i: usize) -> Option<Vec2> {
-        self.points.get(i).map(|p| p.pos)
+    pub fn point(&self, p: PointIdx) -> Option<Vec2> {
+        self.points.get(p.0).map(|p| p.pos)
     }
     pub fn spoint(&self, p: PointIdx) -> Option<&SPoint> {
         self.points.get(p.0)
@@ -812,7 +812,7 @@ impl Sketch {
     }
 
     /// Add a free point (or reuse an existing one within `merge_tol` of `p` when `merge_tol > 0`).
-    pub fn add_point(&mut self, p: Vec2, id: Option<&str>) -> Result<usize> {
+    pub fn add_point(&mut self, p: Vec2, id: Option<&str>) -> Result<PointIdx> {
         let p = Self::check_pos(p)?;
         if self.points.len() >= MAX_POINTS {
             return Err(SketchError::TooLarge);
@@ -824,7 +824,7 @@ impl Sketch {
             None => self.fresh("p")?,
         };
         self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None });
-        Ok(self.points.len() - 1)
+        Ok(PointIdx(self.points.len() - 1))
     }
 
     pub(crate) fn curve_id(&mut self, id: Option<&str>, prefix: &str) -> Result<String> {
@@ -837,7 +837,7 @@ impl Sketch {
     }
 
     /// Endpoint ids of a curve's own points: `<curve>.start`, `.end`, `.center`.
-    fn own_point(&mut self, curve: &str, role: &str, p: Vec2) -> Result<usize> {
+    fn own_point(&mut self, curve: &str, role: &str, p: Vec2) -> Result<PointIdx> {
         let id = format!("{curve}.{role}");
         if self.id_taken(&id) {
             return self.add_point(p, None);
@@ -846,8 +846,8 @@ impl Sketch {
     }
 
     /// Line between existing points `a` and `b`.
-    pub fn add_line_pts(&mut self, a: usize, b: usize, id: Option<&str>) -> Result<usize> {
-        if a >= self.points.len() || b >= self.points.len() || a == b {
+    pub fn add_line_pts(&mut self, a: PointIdx, b: PointIdx, id: Option<&str>) -> Result<usize> {
+        if a.0 >= self.points.len() || b.0 >= self.points.len() || a == b {
             return Err(SketchError::Invalid("line needs two distinct points".into()));
         }
         let id = self.curve_id(id, "l")?;
@@ -865,28 +865,28 @@ impl Sketch {
     }
 
     /// Line from `p0` to `p1`, reusing given point indices when provided.
-    pub fn add_line(&mut self, p0: Vec2, p1: Vec2, a: Option<usize>, b: Option<usize>, id: Option<&str>) -> Result<usize> {
+    pub fn add_line(&mut self, p0: Vec2, p1: Vec2, a: Option<PointIdx>, b: Option<PointIdx>, id: Option<&str>) -> Result<usize> {
         Self::check_pos(p0)?;
         Self::check_pos(p1)?;
         let id = self.curve_id(id, "l")?;
         let a = match a {
-            Some(i) if i < self.points.len() => i,
+            Some(i) if i.0 < self.points.len() => i,
             _ => self.own_point(&id, "start", p0)?,
         };
         let b = match b {
-            Some(i) if i < self.points.len() && i != a => i,
+            Some(i) if i.0 < self.points.len() && i != a => i,
             _ => self.own_point(&id, "end", p1)?,
         };
         self.add_line_pts(a, b, Some(&id))
     }
 
-    pub fn add_circle(&mut self, center: Vec2, r: f64, c: Option<usize>, id: Option<&str>) -> Result<usize> {
+    pub fn add_circle(&mut self, center: Vec2, r: f64, c: Option<PointIdx>, id: Option<&str>) -> Result<usize> {
         if !radius_in_range(r) {
             return Err(SketchError::Invalid(format!("radius {r}")));
         }
         let id = self.curve_id(id, "c")?;
         let c = match c {
-            Some(i) if i < self.points.len() => i,
+            Some(i) if i.0 < self.points.len() => i,
             _ => self.own_point(&id, "center", center)?,
         };
         self.curves.push(Curve {
@@ -904,7 +904,7 @@ impl Sketch {
 
     /// Counter-clockwise arc around `center` from `p0` to `p1` (the end point is projected onto
     /// the circle through `p0`).
-    pub fn add_arc(&mut self, center: Vec2, p0: Vec2, p1: Vec2, pts: [Option<usize>; 3], id: Option<&str>) -> Result<usize> {
+    pub fn add_arc(&mut self, center: Vec2, p0: Vec2, p1: Vec2, pts: [Option<PointIdx>; 3], id: Option<&str>) -> Result<usize> {
         let r = center.dist(p0);
         if !radius_in_range(r) {
             return Err(SketchError::Invalid("degenerate arc".into()));
@@ -913,15 +913,15 @@ impl Sketch {
         let id = self.curve_id(id, "a")?;
         let n = self.points.len();
         let c = match pts[0] {
-            Some(i) if i < n => i,
+            Some(i) if i.0 < n => i,
             _ => self.own_point(&id, "center", center)?,
         };
         let a = match pts[1] {
-            Some(i) if i < n => i,
+            Some(i) if i.0 < n => i,
             _ => self.own_point(&id, "start", p0)?,
         };
         let b = match pts[2] {
-            Some(i) if i < n && i != a => i,
+            Some(i) if i.0 < n && i != a => i,
             _ => self.own_point(&id, "end", p1)?,
         };
         self.curves.push(Curve {
@@ -952,7 +952,7 @@ impl Sketch {
         use ConstraintKind::*;
         let (ps, cs) = k.indices();
         for p in &ps {
-            if *p >= self.points.len() {
+            if p.0 >= self.points.len() {
                 return Err(SketchError::Unknown(format!("point #{p}")));
             }
         }
@@ -1138,8 +1138,8 @@ impl Sketch {
 
     /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a
     /// point of a fixed curve.
-    pub fn point_locked(&self, i: usize) -> bool {
-        self.points.get(i).is_some_and(|p| p.fixed || p.link.is_some())
+    pub fn point_locked(&self, i: PointIdx) -> bool {
+        self.spoint(i).is_some_and(|p| p.fixed || p.link.is_some())
             || self.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: i })
             || self.curves.iter().any(|c| c.fixed && c.kind.uses(i))
     }
@@ -1147,8 +1147,8 @@ impl Sketch {
     /// [`Sketch::point_locked`] for every point at once: the points every solve keeps as they are.
     pub fn locked_points(&self) -> Vec<bool> {
         let mut out: Vec<bool> = self.points.iter().map(|p| p.fixed || p.link.is_some()).collect();
-        let mut set = |i: usize| {
-            if let Some(x) = out.get_mut(i) {
+        let mut set = |i: PointIdx| {
+            if let Some(x) = out.get_mut(i.0) {
                 *x = true;
             }
         };
@@ -1175,11 +1175,11 @@ impl Sketch {
         let mut root: Vec<usize> = (0..self.points.len()).collect();
         for c in &self.constraints {
             if let ConstraintKind::Coincident { p, q } = c.kind {
-                union(&mut root, p, q);
+                union(&mut root, p.0, q.0);
             }
         }
         let ends: Vec<Vec<usize>> =
-            self.curves.iter().map(|c| c.kind.ends().map(|(a, b)| vec![find(&mut root, a), find(&mut root, b)]).unwrap_or_default()).collect();
+            self.curves.iter().map(|c| c.kind.ends().map(|(a, b)| vec![find(&mut root, a.0), find(&mut root, b.0)]).unwrap_or_default()).collect();
         let mut seen = vec![false; self.curves.len()];
         let mut stack = vec![ci];
         let mut out = Vec::new();
@@ -1211,7 +1211,7 @@ impl Sketch {
     /// corner): points used by no curve, held on two or more lines or arcs (their extensions).
     /// Each with the extension segments from the corner to the nearest end of those curves, for
     /// drawing.
-    pub fn virtual_corners(&self) -> Vec<(usize, Vec<(Vec2, Vec2)>)> {
+    pub fn virtual_corners(&self) -> Vec<(PointIdx, Vec<(Vec2, Vec2)>)> {
         const MAX_POINT_REFERENCES: usize = 1_000_000;
         if self.points.len() > MAX_POINTS || self.constraints.len() > MAX_CONSTRAINTS || self.curves.len() > MAX_POINT_REFERENCES {
             return Vec::new();
@@ -1231,7 +1231,7 @@ impl Sketch {
         let mut used = vec![false; self.points.len()];
         for curve in &self.curves {
             for point in curve.kind.point_ids() {
-                if let Some(slot) = used.get_mut(point) {
+                if let Some(slot) = used.get_mut(point.0) {
                     *slot = true;
                 }
             }
@@ -1240,7 +1240,7 @@ impl Sketch {
         let mut seen = std::collections::HashSet::new();
         for constraint in &self.constraints {
             let ConstraintKind::PointOnCurve { p, c } = constraint.kind else { continue };
-            if p == 0 || used.get(p).copied() != Some(false) || !self.point(p).is_some_and(|p| p.is_finite()) {
+            if p == PointIdx::ORIGIN || used.get(p.0).copied() != Some(false) || !self.point(p).is_some_and(|p| p.is_finite()) {
                 continue;
             }
             let Some(curve) = self.curves.get(c) else { continue };
@@ -1250,7 +1250,7 @@ impl Sketch {
                 continue;
             }
             if seen.insert((p, c))
-                && let Some(on) = incidence.get_mut(p)
+                && let Some(on) = incidence.get_mut(p.0)
             {
                 on.push(c);
             }
@@ -1260,6 +1260,7 @@ impl Sketch {
             if on.len() < 2 {
                 continue;
             }
+            let i = PointIdx(i);
             let Some(p) = self.point(i) else { continue };
             let mut ext = Vec::new();
             for c in on {
@@ -1282,7 +1283,7 @@ impl Sketch {
     }
 
     /// Every point a constraint touches: its points and the points of its curves.
-    pub fn constraint_points(&self, k: &ConstraintKind) -> Vec<usize> {
+    pub fn constraint_points(&self, k: &ConstraintKind) -> Vec<PointIdx> {
         let (mut pts, curves) = k.indices();
         pts.extend(curves.into_iter().flat_map(|c| self.curves.get(c).map(|x| x.kind.point_ids()).unwrap_or_default()));
         pts
@@ -1293,13 +1294,13 @@ impl Sketch {
     /// points and free circle/ellipse radii joined to them through curves and driving
     /// constraints without passing through a constant (a held, fixed or projected point or
     /// radius couples nothing).
-    pub fn coupled(&self, points: &[usize], radii: &[usize]) -> (Vec<bool>, Vec<bool>) {
+    pub fn coupled(&self, points: &[PointIdx], radii: &[usize]) -> (Vec<bool>, Vec<bool>) {
         let (n, m) = (self.points.len(), self.curves.len());
         // Nodes: points, then curve radii, then one node standing for everything held.
         let held = n + m;
         let mut root: Vec<usize> = (0..=held).collect();
         let mut seed = vec![false; n + m];
-        for v in points.iter().copied().chain(radii.iter().map(|c| n.saturating_add(*c))) {
+        for v in points.iter().map(|p| p.0).chain(radii.iter().map(|c| n.saturating_add(*c))) {
             if let Some(s) = seed.get_mut(v) {
                 *s = true;
             }
@@ -1318,7 +1319,7 @@ impl Sketch {
             }
         };
         let curve_nodes = |c: usize| {
-            let mut v = self.curves.get(c).map(|x| x.kind.point_ids()).unwrap_or_default();
+            let mut v: Vec<usize> = self.curves.get(c).map(|x| x.kind.point_ids()).unwrap_or_default().into_iter().map(|p| p.0).collect();
             v.push(n + c);
             v
         };
@@ -1326,15 +1327,16 @@ impl Sketch {
         // periodic spline's first and last points, and each driving constraint's entities. A
         // curve alone joins nothing (a circle's radius and centre move independently).
         let own = self.curves.iter().filter_map(|x| match &x.kind {
-            CurveKind::Arc { c, a, b } => Some(vec![*c, *a, *b]),
+            CurveKind::Arc { c, a, b } => Some(vec![c.0, a.0, b.0]),
             CurveKind::Spline { pts, periodic: true, .. } => match (pts.first(), pts.last()) {
-                (Some(a), Some(b)) if a != b => Some(vec![*a, *b]),
+                (Some(a), Some(b)) if a != b => Some(vec![a.0, b.0]),
                 _ => None,
             },
             _ => None,
         });
         let edges = own.chain(self.constraints.iter().filter(|c| !c.driven).map(|c| {
-            let (mut v, curves) = c.kind.indices();
+            let (points, curves) = c.kind.indices();
+            let mut v: Vec<usize> = points.into_iter().map(|p| p.0).collect();
             v.extend(curves.into_iter().flat_map(curve_nodes));
             v
         }));
@@ -1408,7 +1410,7 @@ impl Sketch {
     /// (and for higher-degree splines, which stay polylines).
     pub fn exact_segs(&self, ci: usize) -> Option<Vec<Seg2>> {
         let cu = self.curves.get(ci)?;
-        let pt = |i: &usize| self.point(*i);
+        let pt = |i: &PointIdx| self.point(*i);
         match &cu.kind {
             CurveKind::Ellipse { c, m, r } => {
                 let (c, m) = (pt(c)?, pt(m)?);
@@ -1456,7 +1458,7 @@ impl Sketch {
     /// polylines.
     pub fn polyline(&self, ci: usize) -> Vec<Vec2> {
         let Some(cu) = self.curves.get(ci) else { return Vec::new() };
-        let pt = |i: &usize| self.point(*i);
+        let pt = |i: &PointIdx| self.point(*i);
         match &cu.kind {
             CurveKind::Ellipse { c, m, r } => match (pt(c), pt(m)) {
                 (Some(c), Some(m)) => crate::curves::ellipse_polyline(c, m, *r),
@@ -1487,7 +1489,7 @@ impl Sketch {
     /// Add a curve of any kind over existing points.
     pub fn add_curve(&mut self, kind: CurveKind, id: Option<&str>) -> Result<usize> {
         let ids = kind.point_ids();
-        if ids.iter().any(|p| *p >= self.points.len()) {
+        if ids.iter().any(|p| p.0 >= self.points.len()) {
             return Err(SketchError::Invalid("curve point out of range".into()));
         }
         let prefix = match &kind {
@@ -1534,14 +1536,14 @@ impl Sketch {
     /// Remove curves (by index) and then any points no longer used by a curve (except the
     /// origin and free points), and constraints that referred to removed entities.
     pub fn remove_curves(&mut self, which: &[usize]) {
-        let mut owned: Vec<usize> = Vec::new();
+        let mut owned: Vec<PointIdx> = Vec::new();
         for (i, c) in self.curves.iter().enumerate() {
             if which.contains(&i) {
                 owned.extend(c.kind.point_ids());
             }
         }
         self.drop_curves(which);
-        let mut orphans: Vec<usize> = owned.into_iter().filter(|p| *p != 0 && !self.point_used_by_curve(*p)).collect();
+        let mut orphans: Vec<PointIdx> = owned.into_iter().filter(|p| *p != PointIdx::ORIGIN && !self.point_used_by_curve(*p)).collect();
         orphans.sort_unstable();
         orphans.dedup();
         self.remove_points(&orphans);
@@ -1549,7 +1551,7 @@ impl Sketch {
         self.prune_patterns();
     }
 
-    fn point_used_by_curve(&self, p: usize) -> bool {
+    fn point_used_by_curve(&self, p: PointIdx) -> bool {
         self.curves.iter().any(|c| c.kind.uses(p))
     }
 
@@ -1571,16 +1573,16 @@ impl Sketch {
             k
         });
         let cm = |i: usize| cmap.get(i).copied().flatten();
-        let pm = |i: usize| Some(i);
+        let pm = |i: PointIdx| Some(i);
         self.constraints.retain_mut(|c| c.kind.remap(&pm, &cm));
     }
 
     /// Remove points (never the origin) and every curve/constraint using them.
-    pub fn remove_points(&mut self, which: &[usize]) {
+    pub fn remove_points(&mut self, which: &[PointIdx]) {
         if which.is_empty() {
             return;
         }
-        let gone = |p: usize| p != 0 && which.contains(&p);
+        let gone = |p: PointIdx| p != PointIdx::ORIGIN && which.contains(&p);
         let dead_curves: Vec<usize> =
             self.curves.iter().enumerate().filter(|(_, c)| c.kind.point_ids().into_iter().any(gone)).map(|(i, _)| i).collect();
         let private = dead_curves
@@ -1590,7 +1592,7 @@ impl Sketch {
             .flat_map(|c| c.kind.point_ids())
             .collect::<std::collections::BTreeSet<_>>();
         self.drop_curves(&dead_curves);
-        let mut removed = which.iter().copied().filter(|i| *i != 0).collect::<std::collections::BTreeSet<_>>();
+        let mut removed = which.iter().copied().filter(|i| *i != PointIdx::ORIGIN).collect::<std::collections::BTreeSet<_>>();
         // Keep any node still named by a surviving curve or constraint.
         let referenced = self.curves.iter().flat_map(|c| c.kind.point_ids()).collect::<std::collections::BTreeSet<_>>();
         let constraint_points = std::cell::RefCell::new(std::collections::BTreeSet::new());
@@ -1606,28 +1608,28 @@ impl Sketch {
         }
         let constraint_points = constraint_points.into_inner();
         for index in private {
-            if index != 0 && !referenced.contains(&index) && !constraint_points.contains(&index) {
+            if index != PointIdx::ORIGIN && !referenced.contains(&index) && !constraint_points.contains(&index) {
                 removed.insert(index);
             }
         }
-        let gone = |p: usize| removed.contains(&p);
+        let gone = |p: PointIdx| removed.contains(&p);
         let mut pmap = vec![None; self.points.len()];
         let mut n = 0;
         for (i, slot) in pmap.iter_mut().enumerate() {
-            if !gone(i) {
-                *slot = Some(n);
+            if !gone(PointIdx(i)) {
+                *slot = Some(PointIdx(n));
                 n += 1;
             }
         }
-        let pm = |i: usize| pmap.get(i).copied().flatten();
+        let pm = |i: PointIdx| pmap.get(i.0).copied().flatten();
         for c in &mut self.curves {
-            c.kind.map_points(&|i| pm(i).unwrap_or(0));
+            c.kind.map_points(&|i| pm(i).unwrap_or(PointIdx::ORIGIN));
         }
         let cm = |i: usize| Some(i);
         self.constraints.retain_mut(|c| c.kind.remap(&pm, &cm));
         let mut idx = 0;
         self.points.retain(|_| {
-            let k = !gone(idx);
+            let k = !gone(PointIdx(idx));
             idx += 1;
             k
         });
@@ -1636,7 +1638,7 @@ impl Sketch {
     }
 
     /// Resolve a point reference: a point id (`origin`, `l1.end`, `p3`) or `<curve>.start|end|center`.
-    pub fn resolve_point(&self, r: &str) -> Option<usize> {
+    pub fn resolve_point(&self, r: &str) -> Option<PointIdx> {
         if let Some(i) = self.point_index(r) {
             return Some(i);
         }

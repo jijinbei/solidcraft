@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Aabb2, Vec2, Vec3};
 
-use crate::model::{Curve, CurveKind, Result, Sketch, SketchError, in_range, radius_in_range};
+use crate::model::{Curve, CurveKind, PointIdx, Result, Sketch, SketchError, in_range, radius_in_range};
 
 /// Points of one link closer than this are merged into one point.
 const MERGE_TOL: f64 = 1e-7;
@@ -553,8 +553,8 @@ impl Sketch {
     }
 
     /// Points owned by a link, in creation order.
-    pub fn link_points(&self, id: &str) -> Vec<usize> {
-        self.points.iter().enumerate().filter(|(_, p)| p.link.as_deref() == Some(id)).map(|(i, _)| i).collect()
+    pub fn link_points(&self, id: &str) -> Vec<PointIdx> {
+        self.points.iter().enumerate().filter(|(_, p)| p.link.as_deref() == Some(id)).map(|(i, _)| PointIdx(i)).collect()
     }
 
     /// Is this curve linked reference geometry?
@@ -617,14 +617,14 @@ impl Sketch {
     }
 
     fn build_link(&mut self, id: &str, lay: &Layout) -> Result<()> {
-        let mut idx: Vec<Option<usize>> = vec![None; lay.pts.len()];
-        let mut point = |sk: &mut Sketch, li: usize| -> Result<usize> {
+        let mut idx: Vec<Option<PointIdx>> = vec![None; lay.pts.len()];
+        let mut point = |sk: &mut Sketch, li: usize| -> Result<PointIdx> {
             if let Some(Some(i)) = idx.get(li) {
                 return Ok(*i);
             }
             let p = lay.pts.get(li).copied().ok_or_else(|| SketchError::Invalid("link point".into()))?;
             let i = sk.add_point(p, None)?;
-            if let Some(sp) = sk.points.get_mut(i) {
+            if let Some(sp) = sk.spoint_mut(i) {
                 sp.fixed = true;
                 sp.link = Some(id.to_string());
             }
@@ -689,7 +689,8 @@ impl Sketch {
         let curves = self.link_curves(id);
         let points = self.link_points(id);
         // Current layout of the link, in the same terms.
-        let local = |p: usize| points.iter().position(|q| *q == p);
+        let local = |p: PointIdx| points.iter().position(|q| *q == p);
+
         let cur: Option<Vec<LCurve>> = curves
             .iter()
             .map(|ci| match self.curves.get(*ci).map(|c| &c.kind) {
@@ -793,7 +794,7 @@ impl Sketch {
         // The same geometry walked in another order or direction (e.g. a face loop re-read after
         // a rollback) is not a change: keep the entities, and the constraints on them.
         if let Some(cur) = &cur {
-            let pos = |pi: usize| self.points.get(pi).map(|p| p.pos);
+            let pos = |pi: PointIdx| self.point(pi);
             let old: Option<Vec<(LCurve, Vec<Vec2>)>> = cur
                 .iter()
                 .map(|c| curve_points(c).into_iter().map(|li| points.get(li).and_then(|pi| pos(*pi))).collect::<Option<Vec<_>>>().map(|ps| (*c, ps)))
@@ -929,7 +930,7 @@ impl Sketch {
             }
             if curve_map.len() == cur.len() && mapping.len() == points.len() {
                 for (pi, li) in points.iter().zip(mapping) {
-                    if let (Some(p), Some(q)) = (self.points.get_mut(*pi), lay.pts.get(li)) {
+                    if let (Some(p), Some(q)) = (self.spoint_mut(*pi), lay.pts.get(li)) {
                         p.pos = *q;
                     }
                 }
@@ -963,7 +964,7 @@ impl Sketch {
         if same {
             for (k, pi) in points.iter().enumerate() {
                 let p = order.get(k).and_then(|li| lay.pts.get(*li)).copied();
-                if let (Some(p), Some(sp)) = (p, self.points.get_mut(*pi)) {
+                if let (Some(p), Some(sp)) = (p, self.spoint_mut(*pi)) {
                     sp.pos = p;
                 }
             }

@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_geom::{Seg2, Vec2};
-use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
+use solidcraft_sketch::{ConstraintKind, CurveKind, PointIdx, Sketch};
 
 use super::sketch::add_c;
 use crate::Result;
@@ -137,7 +137,7 @@ fn span(segs: &[Seg2], ua: f64, ub: f64) -> Vec<Seg2> {
 
 /// Add pieces as curves, chained from point `start` (an existing point index or a new one) to
 /// `end`. Returns the new curve indices.
-fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<usize>, end: Option<usize>, construction: bool) -> Result<Vec<usize>> {
+fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<PointIdx>, end: Option<PointIdx>, construction: bool) -> Result<Vec<usize>> {
     let mut made = Vec::new();
     let n = segs.len();
     let mut prev = match start {
@@ -255,12 +255,12 @@ fn modify(sk: &mut Sketch, ci: usize, at: Vec2, remove: bool, points: Option<&[V
     };
     let gone = if remove { intervals.iter().position(inside) } else { None };
     // Points at the cuts are shared by neighbouring intervals.
-    let mut cut_pt: Vec<(f64, usize)> = Vec::new();
+    let mut cut_pt: Vec<(f64, PointIdx)> = Vec::new();
     for (u, q, _) in &cs {
         cut_pt.push((*u, sk.add_point(*q, None)?));
     }
     let point_for =
-        |u: f64, cut_pt: &[(f64, usize)]| cut_pt.iter().find(|(x, _)| (x - u.rem_euclid(n)).abs() < 1e-9 || (x - u).abs() < 1e-9).map(|p| p.1);
+        |u: f64, cut_pt: &[(f64, PointIdx)]| cut_pt.iter().find(|(x, _)| (x - u.rem_euclid(n)).abs() < 1e-9 || (x - u).abs() < 1e-9).map(|p| p.1);
     let mut made = Vec::new();
     for (k, iv) in intervals.iter().enumerate() {
         if Some(k) == gone {
@@ -286,7 +286,7 @@ fn modify(sk: &mut Sketch, ci: usize, at: Vec2, remove: bool, points: Option<&[V
         .map(|(a, b, ..)| span(&segs, *a, *b).iter().flat_map(|s| s.polyline(1e-3)).map(|q| [q.x, q.y]).collect())
         .unwrap_or_default();
     sk.remove_curves(&[ci]);
-    let unused: Vec<usize> = cut_pt.iter().map(|x| x.1).filter(|pi| !sk.curves.iter().any(|c| c.kind.uses(*pi))).collect();
+    let unused: Vec<PointIdx> = cut_pt.iter().map(|x| x.1).filter(|pi| !sk.curves.iter().any(|c| c.kind.uses(*pi))).collect();
     sk.remove_points(&unused);
     Ok(json!({"curves": ids, "removed": removed}))
 }

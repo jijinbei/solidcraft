@@ -1,5 +1,5 @@
 use super::*;
-use solidcraft_engine::sketch::CurveKind;
+use solidcraft_engine::sketch::{CurveKind, PointIdx};
 
 #[test]
 fn three_point_arc_follows_its_snapped_through_point_after_dimension_change() {
@@ -232,7 +232,7 @@ fn corner_window_takes_the_corner_then_applies_the_typed_size() {
         assert_eq!(h.app.session.undo.len(), before.1 + 1, "{command} must be one undo entry");
         let st = h.app.session.world_state();
         let ss = st.sketch(sid).unwrap();
-        assert_eq!(ss.sketch.point(0), Some(Vec2::ZERO));
+        assert_eq!(ss.sketch.point(PointIdx::ORIGIN), Some(Vec2::ZERO));
         assert!(ss.sketch.points[0].fixed);
         assert_eq!(ss.sketch.curves.len(), 5, "{command} must actually modify the geometry; status: {:?}", h.app.status);
         if command == "sketch.fillet" {
@@ -536,7 +536,7 @@ fn ordinary_drawing_keeps_origin_snap_and_real_origin_corners_work() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
     let st = h.app.session.world_state();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
-    assert_eq!(ss.sketch.point(0), Some(Vec2::ZERO));
+    assert_eq!(ss.sketch.point(PointIdx::ORIGIN), Some(Vec2::ZERO));
     assert!(ss.sketch.curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })));
     assert_eq!(ss.profiles.len(), 1);
 }

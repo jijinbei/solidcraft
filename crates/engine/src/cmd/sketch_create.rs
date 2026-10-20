@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, Sketch, TextAlign, TextExprs, TextStyle};
+use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, PointIdx, Shape, Sketch, TextAlign, TextExprs, TextStyle};
 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
 macro_rules! text_style_doc {
@@ -305,7 +305,7 @@ pub(super) fn text_link<'a>(sk: &'a Sketch, entity: &str) -> Option<&'a str> {
         .curve_index(entity)
         .and_then(|i| sk.curves.get(i))
         .and_then(|c| c.link.as_deref())
-        .or_else(|| sk.resolve_point(entity).and_then(|i| sk.points.get(i)).and_then(|p| p.link.as_deref()))?;
+        .or_else(|| sk.resolve_point(entity).and_then(|i| sk.spoint(i)).and_then(|p| p.link.as_deref()))?;
     sk.link(link).filter(|source| source.kind == LinkKind::Text).map(|source| source.id.as_str())
 }
 
@@ -421,7 +421,7 @@ fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) -
 }
 
 /// The curve ending at point `pi` and the direction leaving it there.
-fn end_of(sk: &Sketch, pi: usize) -> Option<(usize, Vec2)> {
+fn end_of(sk: &Sketch, pi: PointIdx) -> Option<(usize, Vec2)> {
     sk.curves.iter().enumerate().filter(|(_, c)| !c.construction).find_map(|(i, _)| leaving_dir(sk, i, pi).map(|d| (i, d)))
 }
 
@@ -458,7 +458,7 @@ fn flip_odd(d: &mut [Vec2]) {
 /// curvature rate included) and a conic the quotient rule's terms. Errors when the curve has no
 /// exact piece, when a derivative is not finite (a corrupt or degenerate reference), or when it
 /// has no tangent at all: no blend can meet the last case.
-fn joint_derivatives(sk: &Sketch, ci: usize, pi: usize, order: usize, leaving: bool, what: &str, cmd: &str) -> Result<Vec<Vec2>> {
+fn joint_derivatives(sk: &Sketch, ci: usize, pi: PointIdx, order: usize, leaving: bool, what: &str, cmd: &str) -> Result<Vec<Vec2>> {
     let id = sk.curves.get(ci).map(|c| c.id.as_str()).unwrap_or("?");
     let (start, end) = sk.curves.get(ci).and_then(|c| c.kind.ends()).ok_or_else(|| bad(cmd, format!("`{id}` has no end points")))?;
     let at_end = end == pi;
@@ -510,7 +510,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
             // joints. Tangency comes from the construction, so it needs no tangent constraints.
             let da = joint_derivatives(sk, ca, pa, order, true, "a", cmd)?;
             let db = joint_derivatives(sk, cb, pb, order, false, "b", cmd)?;
-            let mut pts: Vec<usize> = Vec::with_capacity(2 * order + 2);
+            let mut pts: Vec<PointIdx> = Vec::with_capacity(2 * order + 2);
             let cps = solidcraft_geom::hermite_bezier(qa, qb, &da, &db)
                 .ok_or_else(|| bad(cmd, "the blend curve could not be built from the derivatives of `a` and `b`"))?;
             for (i, q) in cps.iter().enumerate() {
@@ -613,7 +613,7 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(result(out, info))
 }
 
-fn point_list(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, cmd: &str) -> Result<Vec<usize>> {
+fn point_list(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, cmd: &str) -> Result<Vec<PointIdx>> {
     let list = p.get("points").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`points` must be a list"))?;
     if list.len() < 2 || list.len() > solidcraft_sketch::MAX_SPLINE_POINTS {
         return Err(bad(cmd, "a spline needs 2 to 500 points"));
@@ -717,7 +717,7 @@ fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Direction leaving curve `ci` at its end point `pi` (continuing the curve past that end).
-fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
+fn leaving_dir(sk: &Sketch, ci: usize, pi: PointIdx) -> Option<Vec2> {
     match sk.curves.get(ci)?.kind {
         CurveKind::Line { a, b } => {
             let (pa, pb) = (sk.point(a)?, sk.point(b)?);
@@ -774,8 +774,10 @@ fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
         // point, lying on the end of the curve that trimmed it, which is the one a click picks (#1485).
         let at = st.pos();
         let tol = 1e-6 * at.len().max(1.0);
-        let candidates: Vec<usize> =
-            std::iter::once(picked).chain((0..sk.points.len()).filter(|&q| q != picked && sk.point(q).is_some_and(|x| x.dist(at) <= tol))).collect();
+        let candidates: Vec<PointIdx> = std::iter::once(picked)
+            .chain((0..sk.points.len()).map(PointIdx).filter(|&q| q != picked && sk.point(q).is_some_and(|x| x.dist(at) <= tol)))
+            .collect();
+
         let (ci, pi) = match str_(p, "curve") {
             Some(id) => {
                 let ci = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;

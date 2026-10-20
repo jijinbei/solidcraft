@@ -54,7 +54,7 @@ impl Colors {
 pub struct SketchPreview {
     pub sketch: std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
     pub curves: Vec<usize>,
-    pub points: Vec<usize>,
+    pub points: Vec<solidcraft_engine::sketch::PointIdx>,
 }
 
 /// A computed preview: the scene to draw and the bodies it stands in for.
@@ -672,7 +672,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
                 .points
                 .iter()
                 .enumerate()
-                .filter_map(|(i, p)| if old_points.contains(p.id.as_str()) { None } else { Some(i) })
+                .filter_map(|(i, p)| if old_points.contains(p.id.as_str()) { None } else { Some(solidcraft_engine::sketch::PointIdx(i)) })
                 .collect::<Vec<_>>();
             if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
         })

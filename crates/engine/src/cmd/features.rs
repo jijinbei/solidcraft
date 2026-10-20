@@ -2097,7 +2097,7 @@ fn body_of_other_component_at(s: &Session, p: Vec3) -> Option<String> {
 fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
     let st = s.model.state();
     let Some(ss) = st.sketch(sketch) else { return Vec::new() };
-    let mut ends: Vec<usize> = Vec::new();
+    let mut ends: Vec<solidcraft_sketch::PointIdx> = Vec::new();
     for c in &ss.sketch.curves {
         match &c.kind {
             solidcraft_sketch::CurveKind::Circle { .. } => {}
@@ -2107,7 +2107,13 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             solidcraft_sketch::CurveKind::Conic { a, b, apex, .. } => ends.extend([*a, *b, *apex]),
         }
     }
-    ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
+    ss.sketch
+        .points
+        .iter()
+        .enumerate()
+        .filter(|(i, p)| p.id != "origin" && !ends.contains(&solidcraft_sketch::PointIdx(*i)))
+        .map(|(_, p)| p.id.clone())
+        .collect()
 }
 
 fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {

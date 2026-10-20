@@ -1,5 +1,5 @@
 //! Associative offsets keep their output entity ids while their source curves move.
-use crate::{ConstraintKind, CurveKind, Shape, Sketch, SketchError, intersections};
+use crate::{ConstraintKind, CurveKind, PointIdx, Shape, Sketch, SketchError, intersections};
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec2;
 
@@ -91,9 +91,9 @@ impl Sketch {
             .flat_map(|curve| curve.kind.point_ids())
             .collect::<std::collections::BTreeSet<_>>();
         for index in points {
-            if index != 0
+            if index != PointIdx::ORIGIN
                 && self.curves.iter().all(|curve| !curve.kind.uses(index) || released.contains(&curve.id))
-                && let Some(point) = self.points.get_mut(index)
+                && let Some(point) = self.spoint_mut(index)
             {
                 point.fixed = false;
             }
@@ -228,7 +228,7 @@ impl Sketch {
                     _ => return Err(bad()),
                 };
                 for (pi, pos) in [(pa, a), (pb, b)] {
-                    if let Some(p) = self.points.get_mut(pi) {
+                    if let Some(p) = self.spoint_mut(pi) {
                         p.pos = pos;
                         p.fixed = true;
                     }

@@ -156,7 +156,7 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
     use solidcraft_sketch::CurveKind;
     let sk = &ss.sketch;
     let c = sk.curves.get(sk.curve_index(id)?)?;
-    let at = |i: usize| sk.points.get(i).map(|p| ss.plane.to_world(p.pos));
+    let at = |i: solidcraft_sketch::PointIdx| sk.point(i).map(|p| ss.plane.to_world(p));
     let normal = ss.plane.normal().unit()?;
     let (shape, pts) = match c.kind {
         CurveKind::Circle { c, r } => {
@@ -349,7 +349,7 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
                 _ => (given, id.as_str()),
             };
             let ss = sketch_of(s, &st, given, |sk| sk.point_index(id).is_some())?;
-            let p = ss.plane.to_world(ss.sketch.points.get(ss.sketch.point_index(id)?)?.pos);
+            let p = ss.plane.to_world(ss.sketch.spoint(ss.sketch.point_index(id)?)?.pos);
             Some(Item {
                 geo: Geo::Points(vec![p]),
                 dir: None,

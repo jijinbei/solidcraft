@@ -5,7 +5,7 @@ use std::f64::consts::TAU;
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Seg2, Vec2};
 
-use crate::{Curve, CurveKind, OffsetChain, Sketch, SketchError};
+use crate::{Curve, CurveKind, OffsetChain, PointIdx, Sketch, SketchError};
 type Result<T> = std::result::Result<T, SketchError>;
 const MAX_GROUPS: usize = 128;
 const MAX_ROLES: usize = 512;
@@ -72,7 +72,7 @@ struct Arc {
     radius: f64,
     start: f64,
     sweep: f64,
-    centre_index: usize,
+    centre_index: PointIdx,
 }
 #[derive(Clone, Copy)]
 struct Source {
@@ -360,9 +360,9 @@ impl Sketch {
         let mut groups = BTreeSet::new();
         let mut outputs = BTreeSet::new();
         let mut total = 0usize;
-        let point_index: BTreeMap<_, _> = self.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
+        let point_index: BTreeMap<_, _> = self.points.iter().enumerate().map(|(i, p)| (p.id.as_str(), PointIdx(i))).collect();
         let curve_index: BTreeMap<_, _> = self.curves.iter().enumerate().map(|(i, p)| (p.id.as_str(), i)).collect();
-        let mut owners: BTreeMap<usize, BTreeSet<&str>> = BTreeMap::new();
+        let mut owners: BTreeMap<PointIdx, BTreeSet<&str>> = BTreeMap::new();
         for curve in &self.curves {
             for p in curve.kind.point_ids() {
                 owners.entry(p).or_default().insert(curve.id.as_str());
@@ -430,8 +430,8 @@ impl Sketch {
                 let a = *point_index.get(role.start.as_str()).ok_or_else(|| invalid("missing offset endpoint role"))?;
                 let b = *point_index.get(role.end.as_str()).ok_or_else(|| invalid("missing offset endpoint role"))?;
                 for p in [a, b] {
-                    if p == 0
-                        || self.points.get(p).is_none_or(|p| !p.fixed || p.link.is_some())
+                    if p == PointIdx::ORIGIN
+                        || self.spoint(p).is_none_or(|p| !p.fixed || p.link.is_some())
                         || owners.get(&p).is_none_or(|users| users.is_empty() || users.iter().any(|id| !record_outputs.contains(id)))
                     {
                         return Err(invalid("offset endpoints must be fixed private group roles"));
@@ -583,7 +583,7 @@ impl Sketch {
         // roles, each still used by an adjacent surviving straight output.
         for span in &spans {
             let point = candidate.add_point(span.a, None)?;
-            if let Some(p) = candidate.points.get_mut(point) {
+            if let Some(p) = candidate.spoint_mut(point) {
                 p.fixed = true;
             }
             nodes.push(point);
@@ -598,8 +598,8 @@ impl Sketch {
             let role = OffsetRole {
                 output: output.clone(),
                 kind,
-                start: candidate.points.get(a).ok_or_else(|| invalid("missing output node"))?.id.clone(),
-                end: candidate.points.get(b).ok_or_else(|| invalid("missing output node"))?.id.clone(),
+                start: candidate.spoint(a).ok_or_else(|| invalid("missing output node"))?.id.clone(),
+                end: candidate.spoint(b).ok_or_else(|| invalid("missing output node"))?.id.clone(),
                 retired: span.retired,
                 flags: OffsetRoleFlags::default(),
             };
@@ -679,8 +679,8 @@ impl Sketch {
                     roles.push(OffsetRole {
                         output: output.clone(),
                         kind,
-                        start: self.points.get(a).ok_or_else(|| invalid("missing legacy offset node"))?.id.clone(),
-                        end: self.points.get(b).ok_or_else(|| invalid("missing legacy offset node"))?.id.clone(),
+                        start: self.spoint(a).ok_or_else(|| invalid("missing legacy offset node"))?.id.clone(),
+                        end: self.spoint(b).ok_or_else(|| invalid("missing legacy offset node"))?.id.clone(),
                         retired: false,
                         flags: OffsetRoleFlags::of(curve),
                     });
@@ -738,7 +738,7 @@ impl Sketch {
             let a = self.point_index(&role.start).ok_or_else(|| invalid("missing reserved offset endpoint"))?;
             let b = self.point_index(&role.end).ok_or_else(|| invalid("missing reserved offset endpoint"))?;
             for (point, pos) in [(a, span.a), (b, span.b)] {
-                let p = self.points.get_mut(point).ok_or_else(|| invalid("missing reserved offset endpoint"))?;
+                let p = self.spoint_mut(point).ok_or_else(|| invalid("missing reserved offset endpoint"))?;
                 p.pos = pos;
                 p.fixed = true;
             }
@@ -827,7 +827,7 @@ impl Sketch {
             .collect();
         let mut detached = BTreeMap::new();
         for centre in centres {
-            let position = candidate.points.get(centre).ok_or_else(|| invalid("missing offset arc centre"))?.pos;
+            let position = candidate.spoint(centre).ok_or_else(|| invalid("missing offset arc centre"))?.pos;
             detached.insert(centre, candidate.add_point(position, None)?);
         }
         for curve in &mut candidate.curves {
@@ -841,9 +841,9 @@ impl Sketch {
         candidate.offsets.remove(index);
         candidate.constraints.retain(|c| !matches!(&c.kind, crate::ConstraintKind::OffsetDistance { output, .. } if record.owns_output(output)));
         for point in owned {
-            if point != 0
+            if point != PointIdx::ORIGIN
                 && candidate.curves.iter().all(|c| !c.kind.uses(point) || outputs.contains(c.id.as_str()))
-                && let Some(p) = candidate.points.get_mut(point)
+                && let Some(p) = candidate.spoint_mut(point)
             {
                 p.fixed = false;
             }

@@ -24,7 +24,7 @@ fn big(n: usize) -> Session {
     let side = (n as f64).sqrt().ceil() as usize;
     for k in 0..n {
         let (x, y) = ((k % side) as f64 * 30.0, (k / side) as f64 * 30.0);
-        let p: Vec<usize> = [(0.0, 0.0), (20.0, 0.3), (20.2, 15.0), (-0.1, 15.1)]
+        let p: Vec<solidcraft_sketch::PointIdx> = [(0.0, 0.0), (20.0, 0.3), (20.2, 15.0), (-0.1, 15.1)]
             .iter()
             .map(|(dx, dy)| sk.add_point(Vec2::new(x + dx, y + dy), None).unwrap())
             .collect();

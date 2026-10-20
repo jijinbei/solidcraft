@@ -58,7 +58,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         let entity_ids: Vec<String> = cs
             .iter()
             .filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone()))
-            .chain(ps.iter().filter_map(|i| sk.points.get(*i).map(|p| p.id.clone())))
+            .chain(ps.iter().filter_map(|i| sk.spoint(*i).map(|p| p.id.clone())))
             .collect();
         if let Some(old) = &old {
             if entity_ids != old.entities {
@@ -107,7 +107,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                 }
                 None => return Err(bad(cmd, "missing `center`")),
             };
-            let id = sk.points.get(center).ok_or_else(|| bad(cmd, "missing center point"))?.id.clone();
+            let id = sk.spoint(center).ok_or_else(|| bad(cmd, "missing center point"))?.id.clone();
             let full = (total.abs() - 360.0).abs() < 1e-9;
             let step = total / if full { n as f64 } else { (n.max(2) - 1) as f64 };
             let alignment = alignment_param(&params, "alignment", cmd)?;
@@ -180,7 +180,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             Some(old) => old.id.clone(),
             None => sk.fresh("pat")?,
         };
-        let center_id = center.and_then(|i| sk.points.get(i)).map(|p| p.id.clone());
+        let center_id = center.and_then(|i| sk.spoint(i)).map(|p| p.id.clone());
         let mut existing = old.map(|old| old.instances).unwrap_or_default();
         // Remove retired instances first: all following indices are resolved by stable id.
         for instance in existing.iter().filter(|instance| !slots.iter().any(|(index, _, _)| *index == instance.index)) {
@@ -221,7 +221,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                 }
                 for (seed, copy) in &instance.points {
                     let pos = sk.resolve_point(seed).and_then(|i| sk.point(i)).ok_or_else(|| bad(cmd, "missing seed point"))?;
-                    if let Some(point) = sk.resolve_point(copy).and_then(|i| sk.points.get_mut(i)) {
+                    if let Some(point) = sk.resolve_point(copy).and_then(|i| sk.spoint_mut(i)) {
                         point.pos = transform(pos);
                     }
                 }
@@ -242,7 +242,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                 PatternInstance {
                     index,
                     curves: ids_of(sk, &made),
-                    points: map.iter().filter_map(|(p, q)| Some((sk.points.get(*p)?.id.clone(), sk.points.get(*q)?.id.clone()))).collect(),
+                    points: map.iter().filter_map(|(p, q)| Some((sk.spoint(*p)?.id.clone(), sk.spoint(*q)?.id.clone()))).collect(),
                     constraints: cons,
                 }
             };
@@ -250,7 +250,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             constraints.extend(instance.constraints.iter().cloned());
             instances.push(instance);
         }
-        let center_id = center.and_then(|i| sk.points.get(i)).map(|p| p.id.clone());
+        let center_id = center.and_then(|i| sk.spoint(i)).map(|p| p.id.clone());
         let pattern = SketchPattern { id: id.clone(), entities: entity_ids, kind, count_expression, instances };
         if let Some(i) = old_index {
             sk.patterns.insert(i.min(sk.patterns.len()), pattern);

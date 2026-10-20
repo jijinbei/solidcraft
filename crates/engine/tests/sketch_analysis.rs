@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde_json::json;
 use solidcraft_engine::Session;
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{Analysis, ConstraintKind, Sketch, profiling::capture};
+use solidcraft_sketch::{Analysis, ConstraintKind, PointIdx, Sketch, profiling::capture};
 
 fn session(horizontal: bool) -> (Session, u64, String) {
     let mut s = Session::default();
@@ -13,8 +13,8 @@ fn session(horizontal: bool) -> (Session, u64, String) {
     let id = s.active_sketch.unwrap();
     let mut sk = Sketch::new();
     let q = sk.add_point(Vec2::new(10.0, 0.0), None).unwrap();
-    let l = sk.add_line_pts(0, q, None).unwrap();
-    let k = ConstraintKind::Distance { p: 0, q, value: 10.0 };
+    let l = sk.add_line_pts(PointIdx::ORIGIN, q, None).unwrap();
+    let k = ConstraintKind::Distance { p: PointIdx::ORIGIN, q, value: 10.0 };
     sk.add_constraint(k.clone(), None).unwrap();
     let redundant = sk.add_constraint(k, None).unwrap();
     if horizontal {

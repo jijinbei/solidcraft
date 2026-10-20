@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
+use solidcraft_sketch::{ConstraintKind, CurveKind, PointIdx, Sketch};
 
 use super::sketch::{add_c, constraint_result, dof_now, edit, listed, redundancy, residual_of};
 use super::{CommandSpec, in_sketch};
@@ -82,7 +82,7 @@ fn c_polygon(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let (out, info) = edit(s, p, cmd, true, |sk, _| {
         let ls: Vec<usize> = ids.iter().map(|i| sk.curve_index(i).ok_or_else(|| bad(cmd, format!("unknown curve `{i}`")))).collect::<Result<_>>()?;
-        let mut corners: Vec<usize> = Vec::new();
+        let mut corners: Vec<PointIdx> = Vec::new();
         for l in &ls {
             match sk.curves.get(*l).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => {
@@ -150,7 +150,7 @@ fn try_add(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, k: ConstraintKin
     None
 }
 
-fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datum: usize, mut dof: usize) -> (Vec<String>, usize) {
+fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datum: PointIdx, mut dof: usize) -> (Vec<String>, usize) {
     use ConstraintKind::*;
     let tol = num(p, "tolerance").filter(|t| *t > 0.0).unwrap_or(0.01);
     let atol = num(p, "angle_tolerance").filter(|t| *t > 0.0).unwrap_or(1.0).to_radians();
@@ -168,8 +168,8 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
     };
     // Coincident points.
     let np = sk.points.len();
-    for i in 0..np {
-        for j in (i + 1)..np {
+    for i in (0..np).map(PointIdx) {
+        for j in (i.0 + 1..np).map(PointIdx) {
             let (Some(a), Some(b)) = (sk.point(i), sk.point(j)) else { continue };
             if a.dist(b) <= tol {
                 attempt(sk, doc, Coincident { p: i, q: j }, false, &mut dof);
@@ -231,7 +231,7 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
         }
         // Positions from the datum.
         let d = sk.point(datum).unwrap_or_default();
-        for i in 0..sk.points.len() {
+        for i in (0..sk.points.len()).map(PointIdx) {
             if i == datum {
                 continue;
             }
@@ -248,7 +248,7 @@ fn auto(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let ((added, dof), info) = edit(s, p, cmd, false, |sk, doc| {
         let datum = match str_(p, "datum") {
             Some(r) => sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown point `{r}`")))?,
-            None => 0,
+            None => PointIdx::ORIGIN,
         };
         // Values of existing dimensions must be applied (and reached from the stored solved
         // state) before judging degrees of freedom; a sketch they would turn over keeps its
@@ -280,7 +280,7 @@ fn auto_constrain_finish(s: &mut Session, p: &Value) -> Result<Value> {
 /// The constraint two entities (or one line) are closest to satisfying.
 fn guess(sk: &Sketch, ents: &[String], cmd: &str) -> Result<ConstraintKind> {
     use ConstraintKind::*;
-    let ent = |r: &str| -> Result<(Option<usize>, Option<usize>)> {
+    let ent = |r: &str| -> Result<(Option<PointIdx>, Option<usize>)> {
         if let Some(c) = sk.curve_index(r) {
             return Ok((None, Some(c)));
         }
@@ -429,7 +429,8 @@ fn anchor(sk: &Sketch, k: &ConstraintKind) -> Option<Vec2> {
         }
         poly.first().copied()
     };
-    let pt = |p: usize| sk.point(p);
+    let pt = |p: PointIdx| sk.point(p);
+
     match *k {
         OffsetDistance { ref output, .. } => sk.offset_dimension_points(output).map(|(a, b)| (a + b) * 0.5),
         PatternPoint { q, center, .. } => pt(center.unwrap_or(q)),

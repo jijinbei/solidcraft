@@ -3,7 +3,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::{FeatureKind, PlaneRef, expr::Kind};
 use solidcraft_geom::{Plane, Vec2, Vec3};
-use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, PointExprs, Sketch, SolveReport, solve, solve_with};
+use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, PointExprs, PointIdx, Sketch, SolveReport, solve, solve_with};
 
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_vec2, str_, string_list, vec2, vec3};
@@ -397,10 +397,10 @@ fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String
         return Ok(Vec::new());
     }
     // The existing points by x, for a range lookup per new point.
-    let mut old: Vec<(Vec2, usize)> = (0..first.min(sk.points.len())).filter_map(|i| Some((sk.point(i)?, i))).collect();
+    let mut old: Vec<(Vec2, PointIdx)> = (0..first.min(sk.points.len())).map(PointIdx).filter_map(|i| Some((sk.point(i)?, i))).collect();
     old.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
     let mut ties = Vec::new();
-    for q in first..sk.points.len() {
+    for q in (first..sk.points.len()).map(PointIdx) {
         let Some(at) = sk.point(q) else { continue };
         let from = old.partition_point(|(o, _)| o.x < at.x - CONNECT_TOL);
         let hit =
@@ -433,7 +433,7 @@ pub(super) fn draw(
 #[derive(Clone)]
 pub(super) enum PArg {
     At(Vec2),
-    Ref(usize, Vec2),
+    Ref(PointIdx, Vec2),
 }
 
 impl PArg {
@@ -442,7 +442,7 @@ impl PArg {
             PArg::At(p) | PArg::Ref(_, p) => *p,
         }
     }
-    pub(super) fn idx(&self) -> Option<usize> {
+    pub(super) fn idx(&self) -> Option<PointIdx> {
         match self {
             PArg::Ref(i, _) => Some(*i),
             PArg::At(_) => None,
@@ -496,9 +496,9 @@ pub(super) fn expr_point(doc: &solidcraft_doc::Document, v: &Value, cmd: &str) -
 
 /// A new point placed by parameters: fixed where its expressions come to, and moved there
 /// again whenever the parameters change.
-pub(super) fn add_placed_point(sk: &mut Sketch, at: Vec2, exprs: PointExprs, id: Option<&str>) -> Result<usize> {
+pub(super) fn add_placed_point(sk: &mut Sketch, at: Vec2, exprs: PointExprs, id: Option<&str>) -> Result<PointIdx> {
     let i = sk.add_point(at, id)?;
-    if let Some(q) = sk.points.get_mut(i) {
+    if let Some(q) = sk.spoint_mut(i) {
         q.fixed = true;
         q.exprs = Some(Box::new(exprs));
     }
@@ -526,7 +526,7 @@ fn curve_or_axis(sk: &mut Sketch, id: &str) -> Result<Option<usize>> {
     }
 }
 
-pub(super) fn point_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<usize> {
+pub(super) fn point_ref(sk: &Sketch, v: Option<&Value>, cmd: &str, what: &str) -> Result<PointIdx> {
     let id = v.and_then(Value::as_str).ok_or_else(|| bad(cmd, format!("`{what}` must be a point reference")))?;
     sk.resolve_point(id).ok_or_else(|| bad(cmd, format!("unknown sketch point `{id}`")))
 }
@@ -867,7 +867,7 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
         let args: Vec<PArg> = list.iter().map(|v| parg(sk, doc, v, cmd)).collect::<Result<_>>()?;
         let n = args.len();
         let segs = if closed { n } else { n - 1 };
-        let mut pts: Vec<Option<usize>> = args.iter().map(PArg::idx).collect();
+        let mut pts: Vec<Option<PointIdx>> = args.iter().map(PArg::idx).collect();
         let mut curves = Vec::new();
         let mut cons = Vec::new();
         for i in 0..segs {
@@ -942,8 +942,8 @@ fn infer_at_start(sk: &Sketch, c: usize, axis: bool) -> Option<ConstraintKind> {
 }
 
 /// Closed polygon of lines through new or referenced corner points.
-fn polygon_lines(sk: &mut Sketch, corners: &[Vec2]) -> Result<(Vec<usize>, Vec<usize>)> {
-    let pts: Vec<usize> = corners.iter().map(|c| sk.add_point(*c, None)).collect::<std::result::Result<_, _>>()?;
+fn polygon_lines(sk: &mut Sketch, corners: &[Vec2]) -> Result<(Vec<usize>, Vec<PointIdx>)> {
+    let pts: Vec<PointIdx> = corners.iter().map(|c| sk.add_point(*c, None)).collect::<std::result::Result<_, _>>()?;
     let n = pts.len();
     let mut lines = Vec::new();
     for i in 0..n {
@@ -983,7 +983,7 @@ fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
     };
     for c in &sk.constraints {
         if let ConstraintKind::Coincident { p, q } = c.kind {
-            let (rp, rq) = (root(&parent, p), root(&parent, q));
+            let (rp, rq) = (root(&parent, p.0), root(&parent, q.0));
             if rp != rq
                 && let Some(slot) = parent.get_mut(rp)
             {
@@ -991,7 +991,7 @@ fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
             }
         }
     }
-    let (ra, rb) = (root(&parent, a), root(&parent, b));
+    let (ra, rb) = (root(&parent, a.0), root(&parent, b.0));
     sk.constraints.iter().filter(|c| c.id != own).any(|c| {
         let ends = match (&c.kind, horizontal) {
             (ConstraintKind::Horizontal { l: m }, true) | (ConstraintKind::Vertical { l: m }, false) if *m != l => {
@@ -1004,7 +1004,7 @@ fn axis_implied(sk: &Sketch, l: usize, horizontal: bool, own: &str) -> bool {
             _ => None,
         };
         ends.is_some_and(|(p, q)| {
-            let (rp, rq) = (root(&parent, p), root(&parent, q));
+            let (rp, rq) = (root(&parent, p.0), root(&parent, q.0));
             rp != rq && ((rp, rq) == (ra, rb) || (rp, rq) == (rb, ra))
         })
     })
@@ -1035,9 +1035,9 @@ fn drop_implied_axes(sk: &mut Sketch, cons: &mut Vec<String>) {
 /// Which side and corner of an axis-aligned rectangle is which, from its lines and corner
 /// points as `polygon_lines` made them (counter-clockwise from the bottom-left corner), so a
 /// caller can dimension it without inspecting the sketch first.
-fn rect_names(sk: &Sketch, l: &[usize], pts: &[usize]) -> Value {
+fn rect_names(sk: &Sketch, l: &[usize], pts: &[PointIdx]) -> Value {
     let curve = |i: usize| l.get(i).and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone());
-    let point = |i: usize| pts.get(i).and_then(|q| sk.points.get(*q)).map(|q| q.id.clone());
+    let point = |i: usize| pts.get(i).and_then(|q| sk.spoint(*q)).map(|q| q.id.clone());
     json!({
         "sides": {"bottom": curve(0), "right": curve(1), "top": curve(2), "left": curve(3)},
         "corners": {"bottom_left": point(0), "bottom_right": point(1), "top_right": point(2), "top_left": point(3)},
@@ -1401,7 +1401,7 @@ pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w:
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
     let (out, info) = draw(s, p, cmd, |sk, _| {
-        let pts: Vec<usize> =
+        let pts: Vec<PointIdx> =
             [c0 - n * h, c1 - n * h, c1 + n * h, c0 + n * h].iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
         let (p0, p1, p2, p3) = (pts[0], pts[1], pts[2], pts[3]);
         let l1 = sk.add_line_pts(p0, p1, None)?;
@@ -1473,8 +1473,8 @@ fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
             Some((at, None)) => sk.add_point(at, id.as_deref())?,
             None => sk.add_point(req_vec2(cmd, p, "point")?, id.as_deref())?,
         };
-        let cons = connect_points(sk, i, p)?;
-        Ok((sk.points.get(i).map(|q| q.id.clone()).unwrap_or_default(), cons))
+        let cons = connect_points(sk, i.0, p)?;
+        Ok((sk.spoint(i).map(|q| q.id.clone()).unwrap_or_default(), cons))
     })?;
     Ok(json!({"point": pid, "constraints": cons, "sketch": info}))
 }
@@ -1507,7 +1507,7 @@ fn constrain(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&mut Sketch) 
 /// A sketch entity a constraint is applied to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Ent {
-    Point(usize),
+    Point(PointIdx),
     Curve(usize),
 }
 
@@ -1525,7 +1525,7 @@ fn entity_order(sk: &Sketch, p: &Value) -> Option<(Ent, Ent)> {
 /// Held in place: fixed or projected, or fully determined by the constraints already there.
 fn ent_locked(sk: &Sketch, rep: &SolveReport, e: Ent) -> bool {
     match e {
-        Ent::Point(i) => sk.point_locked(i) || rep.point_determined.get(i).copied().unwrap_or(false),
+        Ent::Point(i) => sk.point_locked(i) || rep.point_determined.get(i.0).copied().unwrap_or(false),
         Ent::Curve(c) => sk.curve_locked(c) || rep.curve_determined.get(c).copied().unwrap_or(false),
     }
 }
@@ -1732,12 +1732,12 @@ fn existing_midpoint(sk: &Sketch, l: usize) -> Option<usize> {
 /// Temporary pick intent. Saved sketches use ordinary points and constraints only.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AlignmentTarget {
-    Point(usize),
+    Point(PointIdx),
     Midpoint(usize),
 }
 
 impl AlignmentTarget {
-    fn materialize(self, sk: &mut Sketch, cmd: &str) -> Result<usize> {
+    fn materialize(self, sk: &mut Sketch, cmd: &str) -> Result<PointIdx> {
         match self {
             Self::Point(p) => Ok(p),
             Self::Midpoint(l) => {
@@ -1880,7 +1880,7 @@ fn coincident_circles(s: &mut Session, p: &Value, cmd: &str, a: usize, b: usize)
 }
 
 /// Four endpoint pairs, ordered independently of pick order when distances tie.
-fn coincident_line_points(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
+fn coincident_line_points(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(PointIdx, PointIdx)>> {
     let curve = |key: &str| p.get(key).and_then(Value::as_str).and_then(|id| sk.curve_index(id));
     let (Some(a), Some(b)) = (curve("a"), curve("b")) else { return Ok(None) };
     if a == b {
@@ -1893,7 +1893,7 @@ fn coincident_line_points(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(u
     let (Some(first), Some(second)) = (ends(a), ends(b)) else {
         return Err(bad(cmd, "two curves must both be straight lines; otherwise choose a point and a curve"));
     };
-    let mut best: Option<(f64, usize, usize)> = None;
+    let mut best: Option<(f64, PointIdx, PointIdx)> = None;
     for a in first {
         for b in second {
             let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b)) else { return Err(bad(cmd, "line endpoint is missing")) };
@@ -2027,7 +2027,7 @@ fn existing_midpoint_of(sk: &Sketch, q: usize, l: usize) -> bool {
 
 /// The centre of a symmetry about a point (#1075): `point`, or `line` naming a point rather than
 /// a curve or a sketch axis (the origin picked as the third entity).
-fn symmetry_center(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<usize>> {
+fn symmetry_center(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<PointIdx>> {
     if let Some(r) = p.get("point") {
         return point_ref(sk, Some(r), cmd, "point").map(Some);
     }
@@ -2040,7 +2040,7 @@ fn symmetry_center(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<usize>> {
 
 /// Points `a` and `b` symmetric about point `c`: a construction line from `a` to `b` with `c`
 /// at its midpoint.
-fn symmetric_about_point(sk: &mut Sketch, a: usize, b: usize, c: usize, cmd: &str) -> Result<String> {
+fn symmetric_about_point(sk: &mut Sketch, a: PointIdx, b: PointIdx, c: PointIdx, cmd: &str) -> Result<String> {
     if a == b || a == c || b == c {
         return Err(bad(cmd, "symmetry about a point needs two other points"));
     }
@@ -2099,15 +2099,15 @@ fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// True when the ends of line `a` mirror (about the line `l`) closer onto the ends of `b` crossed
 /// (`a0` with `b1`, `a1` with `b0`) than in order. A degenerate symmetry line keeps the order.
-fn mirror_pairing_is_crossed(sk: &Sketch, l: usize, a: [usize; 2], b: [usize; 2]) -> bool {
+fn mirror_pairing_is_crossed(sk: &Sketch, l: usize, a: [PointIdx; 2], b: [PointIdx; 2]) -> bool {
     let Some((o, e)) = line_pts(sk, l) else { return false };
     let d = e - o;
     let len2 = d.x * d.x + d.y * d.y;
     if len2 < 1e-18 {
         return false;
     }
-    let pt = |i: usize| sk.point(i).unwrap_or_default();
-    let near = |i: usize, j: usize| {
+    let pt = |i: PointIdx| sk.point(i).unwrap_or_default();
+    let near = |i: PointIdx, j: PointIdx| {
         let v = pt(i) - o;
         let t = (v.x * d.x + v.y * d.y) / len2;
         let foot = o + d * t;
@@ -2119,12 +2119,12 @@ fn mirror_pairing_is_crossed(sk: &Sketch, l: usize, a: [usize; 2], b: [usize; 2]
 /// Symmetry about point `c`: two points, two circles/arcs (their centres, and equal radii) or two
 /// lines (each end with the end of the other line nearest its mirror image). The constraints
 /// (the construction lines show in the response's `created`).
-fn symmetry_about_point(sk: &mut Sketch, p: &Value, c: usize, cmd: &str) -> Result<Vec<String>> {
+fn symmetry_about_point(sk: &mut Sketch, p: &Value, c: PointIdx, cmd: &str) -> Result<Vec<String>> {
     let ra = p.get("a").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`a` must be a point or curve"))?;
     let rb = p.get("b").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`b` must be a point or curve"))?;
     let rep = solve(&mut sk.clone());
     let order = ent(sk, ra).zip(ent(sk, rb));
-    let pairs: Vec<(usize, usize)> = match (sk.resolve_point(ra), sk.resolve_point(rb)) {
+    let pairs: Vec<(PointIdx, PointIdx)> = match (sk.resolve_point(ra), sk.resolve_point(rb)) {
         (Some(a), Some(b)) => vec![(a, b)],
         _ => {
             let ca = sk.curve_index(ra).ok_or_else(|| bad(cmd, format!("unknown entity `{ra}`")))?;
@@ -2132,8 +2132,8 @@ fn symmetry_about_point(sk: &mut Sketch, p: &Value, c: usize, cmd: &str) -> Resu
             match (sk.curves.get(ca).map(|x| x.kind.clone()), sk.curves.get(cb).map(|x| x.kind.clone())) {
                 (Some(CurveKind::Line { a: a0, b: a1 }), Some(CurveKind::Line { a: b0, b: b1 })) => {
                     let pc = sk.point(c).unwrap_or_default();
-                    let mirror = |i: usize| pc * 2.0 - sk.point(i).unwrap_or_default();
-                    let near = |i: usize, j: usize| mirror(i).dist(sk.point(j).unwrap_or_default());
+                    let mirror = |i: PointIdx| pc * 2.0 - sk.point(i).unwrap_or_default();
+                    let near = |i: PointIdx, j: PointIdx| mirror(i).dist(sk.point(j).unwrap_or_default());
                     if near(a0, b0) + near(a1, b1) <= near(a0, b1) + near(a1, b0) { vec![(a0, b0), (a1, b1)] } else { vec![(a0, b1), (a1, b0)] }
                 }
                 (Some(_), Some(_)) => {
@@ -2158,11 +2158,11 @@ fn symmetry_about_point(sk: &mut Sketch, p: &Value, c: usize, cmd: &str) -> Resu
     Ok(out)
 }
 
-fn symmetry_pairs(sk: &mut Sketch, pairs: &[(usize, usize)], c: usize, cmd: &str) -> Result<Vec<String>> {
+fn symmetry_pairs(sk: &mut Sketch, pairs: &[(PointIdx, PointIdx)], c: PointIdx, cmd: &str) -> Result<Vec<String>> {
     pairs.iter().map(|(a, b)| symmetric_about_point(sk, *a, *b, c, cmd)).collect()
 }
 
-fn round_center(sk: &Sketch, c: usize) -> Option<usize> {
+fn round_center(sk: &Sketch, c: usize) -> Option<PointIdx> {
     match sk.curves.get(c)?.kind {
         CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
         _ => None,
@@ -2191,12 +2191,12 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
                 curves.push(sk.curve_index(r).ok_or_else(|| bad(cmd, format!("unknown entity `{r}`")))?);
             }
         }
-        let all_fixed = pts.iter().all(|q| *q == 0 || sk.point_locked(*q)) && curves.iter().all(|c| sk.curve_locked(*c));
+        let all_fixed = pts.iter().all(|q| *q == PointIdx::ORIGIN || sk.point_locked(*q)) && curves.iter().all(|c| sk.curve_locked(*c));
         let fix = want.unwrap_or(!all_fixed);
         let mut n = 0;
         for q in pts {
-            let own = sk.points.get(q).is_some_and(|x| x.fixed || x.link.is_some());
-            if q == 0 || own {
+            let own = sk.spoint(q).is_some_and(|x| x.fixed || x.link.is_some());
+            if q == PointIdx::ORIGIN || own {
                 continue;
             }
             let has = sk.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: q });
@@ -2271,7 +2271,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     let start = s.doc.clone();
     let ((param, kind_name, current), info) = edit(s, p, cmd, true, |sk, doc| {
         before = Some(dof_now(sk));
-        let mut ent = |r: &str| -> Result<(Option<usize>, Option<usize>)> {
+        let mut ent = |r: &str| -> Result<(Option<PointIdx>, Option<usize>)> {
             if let Some(c) = sk.curve_index(r) {
                 return Ok((None, Some(c)));
             }
@@ -2689,10 +2689,10 @@ pub(super) fn round6(x: f64) -> f64 {
     (x * 1e6).round() / 1e6
 }
 
-fn line_ends(sk: &Sketch, l: usize) -> (usize, usize) {
+fn line_ends(sk: &Sketch, l: usize) -> (PointIdx, PointIdx) {
     match sk.curves.get(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => (*a, *b),
-        _ => (0, 0),
+        _ => (PointIdx::ORIGIN, PointIdx::ORIGIN),
     }
 }
 
@@ -2747,7 +2747,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             if let Some(c) = sk.curve_index(id) {
                 curves.push(c);
             } else if let Some(q) = sk.point_index(id) {
-                if q == 0 {
+                if q == PointIdx::ORIGIN {
                     return Err(bad(cmd, "the sketch origin cannot be deleted"));
                 }
                 points.push(q);
@@ -2790,9 +2790,10 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             sk.refresh_offsets()?;
         }
         sk.constraints.retain(|c| !cons.contains(&c.id));
-        let pids: Vec<String> = points.iter().filter_map(|q| sk.points.get(*q).map(|x| x.id.clone())).collect();
+        let pids: Vec<String> = points.iter().filter_map(|q| sk.spoint(*q).map(|x| x.id.clone())).collect();
         sk.remove_curves(&curves);
-        let pidx: Vec<usize> = pids.iter().filter_map(|id| sk.point_index(id)).collect();
+        let pidx: Vec<PointIdx> = pids.iter().filter_map(|id| sk.point_index(id)).collect();
+
         sk.remove_points(&pidx);
         doc.prune_model_params();
         Ok(ids.len())

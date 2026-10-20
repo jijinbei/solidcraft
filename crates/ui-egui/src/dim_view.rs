@@ -557,7 +557,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let size = galley.size() + vec2(6.0, 2.0);
         let half = Vec2::new(f64::from(size.x) * 0.5 * px, f64::from(size.y) * 0.5 * px);
         // Unplaced linear dimensions sit outside the shape they measure.
-        let away = first_point(sk, &c.kind).and_then(|p| centres.get(p).copied()).unwrap_or(anchor);
+        let away = first_point(sk, &c.kind).and_then(|p| centres.get(p.0).copied()).unwrap_or(anchor);
         let lay = dim_layout_reaching(&frame, c.text.or_else(|| default_text(&frame, away, px)), px, half, dim_reach(sk, &c.kind));
         let stroke = Stroke::new(1.0, col);
         let mut segs = Vec::new();
@@ -600,7 +600,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 }
 
 /// A point a dimension measures (for the shape it belongs to).
-fn first_point(sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind) -> Option<usize> {
+fn first_point(sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind) -> Option<solidcraft_engine::sketch::PointIdx> {
     use ConstraintKind::*;
     match *k {
         Length { l, .. } => sk.curves.get(l).and_then(|c| c.kind.point_ids().first().copied()),

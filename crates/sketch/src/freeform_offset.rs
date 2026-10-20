@@ -4,7 +4,7 @@
 //! bounds their distance everywhere, rather than just at selected samples. At the
 //! node limit, interior splits align the curves geometrically instead of requiring
 //! identical parameter speeds; stored nodes and interpolation remain unchanged.
-use crate::{CurveKind, Sketch, SketchError, fit_beziers_mode};
+use crate::{CurveKind, PointIdx, Sketch, SketchError, fit_beziers_mode};
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Seg2, Vec2};
 
@@ -401,7 +401,7 @@ impl Sketch {
                 if references > 1_000_000 {
                     return Err(bad("offset point ownership work limit exceeded"));
                 }
-                if let Some(count) = owners.get_mut(index) {
+                if let Some(count) = owners.get_mut(index.0) {
                     *count += 1;
                 }
             }
@@ -440,11 +440,11 @@ impl Sketch {
                     if *periodic == (record.certificate == 2)
                         && (record.certificate != 2 || record.closed)
                         && pts.len() == record.pieces * record.divisions + 1
-                        && pts.iter().all(|i| *i < self.points.len())
+                        && pts.iter().all(|i| i.0 < self.points.len())
                         && pts.iter().copied().collect::<std::collections::BTreeSet<_>>().len() == pts.len()
                         && pts
                             .iter()
-                            .all(|i| self.points.get(*i).is_some_and(|point| point.fixed && point.link.is_none()) && owners.get(*i) == Some(&1)) => {}
+                            .all(|i| self.spoint(*i).is_some_and(|point| point.fixed && point.link.is_none()) && owners.get(i.0) == Some(&1)) => {}
                 _ => return Err(bad("invalid offset output point roles")),
             }
         }
@@ -477,7 +477,7 @@ impl Sketch {
         let mut candidate = self.clone();
         let indices = points.iter().map(|p| candidate.add_point(*p, None)).collect::<Result<Vec<_>>>()?;
         for i in &indices {
-            if let Some(p) = candidate.points.get_mut(*i) {
+            if let Some(p) = candidate.spoint_mut(*i) {
                 p.fixed = true;
             }
         }
@@ -576,7 +576,7 @@ impl Sketch {
                 indices.push(index);
             }
             for (i, pos) in indices.iter().zip(points) {
-                let p = candidate.points.get_mut(*i).ok_or_else(|| bad("offset output point vanished"))?;
+                let p = candidate.spoint_mut(*i).ok_or_else(|| bad("offset output point vanished"))?;
                 p.pos = pos;
                 p.fixed = true;
             }
@@ -597,9 +597,9 @@ impl Sketch {
             return Ok(Vec::new());
         }
         let outputs: std::collections::BTreeSet<&str> = self.freeform_offsets.iter().map(|o| o.output.as_str()).collect();
-        let nodes: std::collections::BTreeSet<usize> =
+        let nodes: std::collections::BTreeSet<PointIdx> =
             self.curves.iter().filter(|c| outputs.contains(c.id.as_str())).flat_map(|c| c.kind.point_ids()).collect();
-        let taken: Vec<(usize, usize)> = self
+        let taken: Vec<(usize, PointIdx)> = self
             .curves
             .iter()
             .enumerate()
@@ -608,7 +608,8 @@ impl Sketch {
             .collect();
         let mut added = Vec::new();
         for (ci, node) in taken {
-            let at = self.points.get(node).map(|p| p.pos).ok_or_else(|| bad("offset output point vanished"))?;
+            let at = self.point(node).ok_or_else(|| bad("offset output point vanished"))?;
+
             let own = self.add_point(at, None)?;
             let curve = self.curves.get_mut(ci).ok_or_else(|| bad("offset neighbour curve vanished"))?;
             curve.kind.map_points(&|p| if p == node { own } else { p });

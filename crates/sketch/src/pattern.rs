@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec2;
 
-use crate::{CurveKind, Sketch, SketchError};
+use crate::{CurveKind, PointIdx, Sketch, SketchError};
 
 /// Placement relative to the original, along a pattern direction's oriented line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,7 +246,7 @@ impl Sketch {
                             let c = center.and_then(|c| self.point(c)).unwrap_or(Vec2::ZERO);
                             let d = seed - c;
                             let (sin, cos) = angle.sin_cos();
-                            if let Some(copy) = self.points.get_mut(q) {
+                            if let Some(copy) = self.points.get_mut(q.0) {
                                 copy.pos = c + Vec2::new(d.x * cos - d.y * sin, d.x * sin + d.y * cos) + offset;
                             }
                         }
@@ -319,11 +319,8 @@ impl Sketch {
                     }
                     let Some(source) = self.curves.get(*seed).cloned() else { continue };
                     if let CurveKind::Arc { c, a, b } = source.kind {
-                        let mapped = |p: usize| {
-                            self.points
-                                .get(p)
-                                .and_then(|p| instance.points.iter().find(|(id, _)| *id == p.id))
-                                .and_then(|(_, id)| self.point_index(id))
+                        let mapped = |p: PointIdx| {
+                            self.spoint(p).and_then(|p| instance.points.iter().find(|(id, _)| *id == p.id)).and_then(|(_, id)| self.point_index(id))
                         };
                         if let (Some(c), Some(a), Some(b), Some(copy)) = (mapped(c), mapped(a), mapped(b), self.curve_index(copy))
                             && let Some(curve) = self.curves.get_mut(copy)
