@@ -43,6 +43,59 @@ pub enum SketchError {
 
 pub(crate) type Result<T> = std::result::Result<T, SketchError>;
 
+/// Index into [`Sketch::points`]. Saved as a plain number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct PointIdx(pub usize);
+
+impl PointIdx {
+    /// The fixed sketch origin, always point 0.
+    pub const ORIGIN: PointIdx = PointIdx(0);
+}
+
+/// Index into [`Sketch::curves`]. Saved as a plain number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CurveIdx(pub usize);
+
+impl std::fmt::Display for PointIdx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::fmt::Display for CurveIdx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::ops::Index<PointIdx> for Vec<SPoint> {
+    type Output = SPoint;
+    fn index(&self, i: PointIdx) -> &SPoint {
+        &self[i.0]
+    }
+}
+
+impl std::ops::IndexMut<PointIdx> for Vec<SPoint> {
+    fn index_mut(&mut self, i: PointIdx) -> &mut SPoint {
+        &mut self[i.0]
+    }
+}
+
+impl std::ops::Index<CurveIdx> for Vec<Curve> {
+    type Output = Curve;
+    fn index(&self, i: CurveIdx) -> &Curve {
+        &self[i.0]
+    }
+}
+
+impl std::ops::IndexMut<CurveIdx> for Vec<Curve> {
+    fn index_mut(&mut self, i: CurveIdx) -> &mut Curve {
+        &mut self[i.0]
+    }
+}
+
 /// A sketch point. `fixed` points are constants for the solver.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SPoint {
@@ -740,6 +793,18 @@ impl Sketch {
     }
     pub fn point(&self, i: usize) -> Option<Vec2> {
         self.points.get(i).map(|p| p.pos)
+    }
+    pub fn spoint(&self, p: PointIdx) -> Option<&SPoint> {
+        self.points.get(p.0)
+    }
+    pub fn spoint_mut(&mut self, p: PointIdx) -> Option<&mut SPoint> {
+        self.points.get_mut(p.0)
+    }
+    pub fn curve(&self, c: CurveIdx) -> Option<&Curve> {
+        self.curves.get(c.0)
+    }
+    pub fn curve_mut(&mut self, c: CurveIdx) -> Option<&mut Curve> {
+        self.curves.get_mut(c.0)
     }
 
     fn check_pos(p: Vec2) -> Result<Vec2> {

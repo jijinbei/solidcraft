@@ -273,6 +273,24 @@ fn removal_and_references() {
 }
 
 #[test]
+fn indices_save_as_plain_numbers() {
+    assert_eq!(serde_json::to_string(&PointIdx(3)).unwrap(), "3");
+    assert_eq!(serde_json::to_string(&CurveIdx(7)).unwrap(), "7");
+    assert_eq!(serde_json::from_str::<PointIdx>("4").unwrap(), PointIdx(4));
+    let mut sk = Sketch::new();
+    let l = sk.add_line(v(0.0, 0.0), v(1.0, 0.0), None, None, Some("l1")).unwrap();
+    sk.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
+    let saved = serde_json::to_value(&sk).unwrap();
+    assert_eq!(saved["curves"][0]["a"], 1);
+    assert_eq!(saved["curves"][0]["b"], 2);
+    assert_eq!(saved["constraints"][0]["l"], 0);
+    let back: Sketch = serde_json::from_value(saved).unwrap();
+    assert_eq!(back.curve(CurveIdx(0)).map(|c| c.id.as_str()), Some("l1"));
+    assert_eq!(back.spoint(PointIdx(2)).map(|p| p.id.as_str()), Some("l1.end"));
+    assert!(back.curve(CurveIdx(1)).is_none());
+}
+
+#[test]
 fn hostile_values_rejected() {
     let mut sk = Sketch::new();
     assert!(sk.add_point(v(f64::NAN, 0.0), None).is_err());
