@@ -686,8 +686,8 @@ fn hostile_lines_and_rounds_neither_panic_nor_change_the_report() {
         Box::new(|sk| raw(sk, ConstraintKind::Concentric { a: CurveIdx(2), b: CurveIdx(2) })),
         Box::new(|sk| raw(sk, ConstraintKind::SlotOverallLength { a: CurveIdx(2), b: CurveIdx(2), value: 5.0 })),
         Box::new(|sk| raw(sk, ConstraintKind::LinearDiameter { p: PointIdx(3), l: CurveIdx(0), value: -1.0 })),
-        Box::new(|sk| sk.points[2].pos = v(f64::NAN, 0.0)),
-        Box::new(|sk| sk.points[3].pos = v(1e300, -1e300)),
+        Box::new(|sk| sk.points[PointIdx(2)].pos = v(f64::NAN, 0.0)),
+        Box::new(|sk| sk.points[PointIdx(3)].pos = v(1e300, -1e300)),
     ];
     for (i, case) in cases.iter().enumerate() {
         let mut c = base();

@@ -813,11 +813,11 @@ fn direction(ends: Option<(usize, usize)>, pos: &dyn Fn(usize) -> Option<Vec2>) 
 /// Every constraint on a line is read as a tie; a tie on a horizontal or vertical line is
 /// then lowered to the relations between two points it amounts to (a row, a column, an offset
 /// across it), which the decomposition builds clusters on.
-pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve: &[(PointIdx, CurveIdx)], radius: &[Option<f64>]) -> Reading {
+pub(crate) fn read(sk: &Sketch, before: &dyn Fn(PointIdx) -> Option<Vec2>, on_curve: &[(PointIdx, CurveIdx)], radius: &[Option<f64>]) -> Reading {
     use ConstraintKind::*;
     let n = sk.points.len();
     let m = sk.curves.len();
-    let before: Vec<Option<Vec2>> = (0..n).map(|i| before(i).filter(|p| in_range(*p))).collect();
+    let before: Vec<Option<Vec2>> = sk.points.indices().map(|i| before(i).filter(|p| in_range(*p))).collect();
     let rf = |i: usize| before.get(i).copied().flatten();
     let lines: Vec<Option<(usize, usize)>> = sk
         .curves

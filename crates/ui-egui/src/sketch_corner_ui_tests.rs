@@ -233,7 +233,7 @@ fn corner_window_takes_the_corner_then_applies_the_typed_size() {
         let st = h.app.session.world_state();
         let ss = st.sketch(sid).unwrap();
         assert_eq!(ss.sketch.point(PointIdx::ORIGIN), Some(Vec2::ZERO));
-        assert!(ss.sketch.points[0].fixed);
+        assert!(ss.sketch.points[PointIdx::ORIGIN].fixed);
         assert_eq!(ss.sketch.curves.len(), 5, "{command} must actually modify the geometry; status: {:?}", h.app.status);
         if command == "sketch.fillet" {
             assert!(ss.sketch.curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })));

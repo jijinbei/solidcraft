@@ -89,16 +89,10 @@ pub fn find(sk: &Sketch, moving: &[(PointIdx, Vec2)], exclude: &[PointIdx], mm_p
     if suppressed() || moving.is_empty() || !(mm_px > 0.0 && mm_px.is_finite()) {
         return keep(None);
     }
-    let id = |i: PointIdx| sk.spoint(i).map(|p| p.id.clone()).unwrap_or_default();
+    let id = |i: PointIdx| sk.points.get(i).map(|p| p.id.clone()).unwrap_or_default();
     let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
-    let targets: Vec<(PointIdx, Vec2)> = sk
-        .points
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (PointIdx(i), p))
-        .filter(|(i, p)| !exclude.contains(i) && visible.takes(p))
-        .map(|(i, p)| (i, p.pos))
-        .collect();
+    let targets: Vec<(PointIdx, Vec2)> =
+        sk.points.iter_enumerated().filter(|(i, p)| !exclude.contains(i) && visible.takes(p)).map(|(i, p)| (i, p.pos)).collect();
     let free_curves: Vec<CurveIdx> =
         (0..sk.curves.len()).map(CurveIdx).filter(|&c| sk.curve(c).is_some_and(|cu| !exclude.iter().any(|&p| cu.kind.uses(p)))).collect();
     let mut best: Option<(f64, Snap)> = None;

@@ -621,7 +621,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
         let at_b = at.dist(qb) <= at.dist(qa);
         let end = if at_b { pb } else { pa };
         let shared = sk.curves.iter().enumerate().filter(|(i, c)| CurveIdx(*i) != ci && uses(c, end)).count();
-        if shared > 0 || sk.spoint(end).is_some_and(|q| q.fixed) {
+        if shared > 0 || sk.points.get(end).is_some_and(|q| q.fixed) {
             return Err(bad(cmd, "that end is connected to other geometry"));
         }
         // Candidate hits on the unbounded curve beyond the chosen end.
@@ -679,22 +679,22 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "multiple curves stop the extension at the same distance"));
         }
         let (_, q, oi) = best.ok_or_else(|| bad(cmd, "nothing to extend to"))?;
-        if let Some(pt) = sk.spoint_mut(end) {
+        if let Some(pt) = sk.points.get_mut(end) {
             pt.pos = q;
         }
         pin(sk, end, oi)?;
         let before = sk.points.iter().map(|p| p.pos).collect::<Vec<_>>();
         let hold = solidcraft_sketch::Hold {
-            points: (0..sk.points.len()).map(PointIdx).filter(|i| *i != end).collect(),
+            points: sk.points.indices().filter(|i| *i != end).collect(),
             radii: (0..sk.curves.len()).map(CurveIdx).collect(),
         };
         if !solidcraft_sketch::solve_with(sk, &hold, None, solidcraft_sketch::Analysis::StatusOnly, None).ok()
             || sk.point(end).is_none_or(|point| point.dist(q) > TOL)
-            || sk.points.iter().enumerate().any(|(i, point)| PointIdx(i) != end && point.pos.dist(before[i]) > TOL)
+            || sk.points.iter_enumerated().zip(&before).any(|((i, point), b)| i != end && point.pos.dist(*b) > TOL)
         {
             return Err(bad(cmd, "the extension conflicts with constraints or cannot preserve its original support"));
         }
-        Ok(sk.spoint(end).map(|x| x.id.clone()).unwrap_or_default())
+        Ok(sk.points.get(end).map(|x| x.id.clone()).unwrap_or_default())
     })?;
     Ok(json!({"moved": out, "sketch": info}))
 }
@@ -911,7 +911,7 @@ fn keep_corner(sk: &mut Sketch, c: PointIdx, [(ca, na), (cb, nb)]: [(CurveIdx, P
         None
     } else {
         let id = sk.fresh("corner")?;
-        if let Some(pt) = sk.spoint_mut(c) {
+        if let Some(pt) = sk.points.get_mut(c) {
             pt.id = id.clone();
         }
         Some(id)
@@ -1735,7 +1735,7 @@ fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
                     for i in points {
                         if i != PointIdx::ORIGIN
                             && sk.curves.iter().all(|c| !c.kind.uses(i) || record.outputs.contains(&c.id))
-                            && let Some(p) = sk.spoint_mut(i)
+                            && let Some(p) = sk.points.get_mut(i)
                         {
                             p.fixed = false;
                         }
@@ -1750,7 +1750,7 @@ fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
         let indices = sk.curves[ci].kind.point_ids();
         sk.freeform_offsets.remove(record);
         for i in indices {
-            if let Some(point) = sk.spoint_mut(i) {
+            if let Some(point) = sk.points.get_mut(i) {
                 point.fixed = false;
             }
         }
@@ -1999,11 +1999,11 @@ fn pattern_rect(s: &mut Session, p: &Value) -> Result<Value> {
 /// Move the points of the entities (in place) through `f`; circle radii scale by `k`.
 fn transform_in_place(sk: &mut Sketch, cs: &[CurveIdx], ps: &[PointIdx], f: &dyn Fn(Vec2) -> Vec2, k: f64, cmd: &str) -> Result<()> {
     let pts = involved_points(sk, cs, ps);
-    if pts.iter().any(|q| sk.spoint(*q).is_some_and(|x| x.fixed || x.link.is_some())) {
+    if pts.iter().any(|q| sk.points.get(*q).is_some_and(|x| x.fixed || x.link.is_some())) {
         return Err(bad(cmd, "fixed or projected geometry cannot move"));
     }
     for q in pts {
-        if let Some(x) = sk.spoint_mut(q) {
+        if let Some(x) = sk.points.get_mut(q) {
             x.pos = f(x.pos);
         }
     }
@@ -2035,7 +2035,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         cs.retain(|&i| !sk.curve(i).and_then(|c| c.link.as_ref()).is_some_and(|link| links.contains(link)));
-        ps.retain(|&i| !sk.spoint(i).and_then(|p| p.link.as_ref()).is_some_and(|link| links.contains(link)));
+        ps.retain(|&i| !sk.points.get(i).and_then(|p| p.link.as_ref()).is_some_and(|link| links.contains(link)));
         let mut text_curves = Vec::new();
         for link in links {
             text_curves.extend(super::sketch_create::move_text(sk, &link, t, ang, c, copy)?);

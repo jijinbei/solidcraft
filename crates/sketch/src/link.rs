@@ -554,7 +554,7 @@ impl Sketch {
 
     /// Points owned by a link, in creation order.
     pub fn link_points(&self, id: &str) -> Vec<PointIdx> {
-        self.points.iter().enumerate().filter(|(_, p)| p.link.as_deref() == Some(id)).map(|(i, _)| PointIdx(i)).collect()
+        self.points.iter_enumerated().filter(|(_, p)| p.link.as_deref() == Some(id)).map(|(i, _)| i).collect()
     }
 
     /// Is this curve linked reference geometry?
@@ -624,7 +624,7 @@ impl Sketch {
             }
             let p = lay.pts.get(li).copied().ok_or_else(|| SketchError::Invalid("link point".into()))?;
             let i = sk.add_point(p, None)?;
-            if let Some(sp) = sk.spoint_mut(i) {
+            if let Some(sp) = sk.points.get_mut(i) {
                 sp.fixed = true;
                 sp.link = Some(id.to_string());
             }
@@ -930,7 +930,7 @@ impl Sketch {
             }
             if curve_map.len() == cur.len() && mapping.len() == points.len() {
                 for (pi, li) in points.iter().zip(mapping) {
-                    if let (Some(p), Some(q)) = (self.spoint_mut(*pi), lay.pts.get(li)) {
+                    if let (Some(p), Some(q)) = (self.points.get_mut(*pi), lay.pts.get(li)) {
                         p.pos = *q;
                     }
                 }
@@ -964,7 +964,7 @@ impl Sketch {
         if same {
             for (k, pi) in points.iter().enumerate() {
                 let p = order.get(k).and_then(|li| lay.pts.get(*li)).copied();
-                if let (Some(p), Some(sp)) = (p, self.spoint_mut(*pi)) {
+                if let (Some(p), Some(sp)) = (p, self.points.get_mut(*pi)) {
                     sp.pos = p;
                 }
             }

@@ -23,7 +23,7 @@ fn current(sk: &Sketch) -> Vec<Vec2> {
 fn decompose_from(sk: &Sketch, known: &[Option<Vec2>], reference: &[Vec2]) -> Placed {
     let reading = crate::loci::read(
         sk,
-        &|i| reference.get(i).or(sk.points.get(i).map(|p| &p.pos)).copied(),
+        &|i| reference.get(i.0).or(sk.points.get(i).map(|p| &p.pos)).copied(),
         &crate::solver::points_on_curves(sk),
         &crate::loci::radii(sk),
     );
@@ -477,7 +477,7 @@ fn bracket_family_is_solved_exactly_by_solve() {
                 assert_eq!(signature(&case.checks, &current(&case.sk)), before, "{datum:?} scale {scale}: mirrored");
                 let target = case.target.as_ref().unwrap();
                 for (i, t) in target.iter().enumerate() {
-                    let p = case.sk.points[i].pos;
+                    let p = case.sk.points[PointIdx(i)].pos;
                     assert!(p.dist(*t) < 1e-8 * case.size.max(1.0), "{datum:?} scale {scale}: point {i} {p:?} vs {t:?}");
                 }
             }
@@ -782,7 +782,7 @@ fn work_is_bounded_on_a_star_of_oriented_pairs() {
     assert!(g.work < MAX_WORK / 10, "work {}", g.work);
     let ground = g.cluster(g.ground.unwrap()).unwrap();
     assert_eq!(ground.pts.len(), n + 1);
-    assert!(ground.pts.iter().all(|(i, p)| p.dist(sk.points[*i].pos) < 1e-12));
+    assert!(ground.pts.iter().all(|(i, p)| p.dist(sk.points[PointIdx(*i)].pos) < 1e-12));
 }
 
 #[test]

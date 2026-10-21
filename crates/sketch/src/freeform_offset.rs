@@ -444,7 +444,8 @@ impl Sketch {
                         && pts.iter().copied().collect::<std::collections::BTreeSet<_>>().len() == pts.len()
                         && pts
                             .iter()
-                            .all(|i| self.spoint(*i).is_some_and(|point| point.fixed && point.link.is_none()) && owners.get(i.0) == Some(&1)) => {}
+                            .all(|i| self.points.get(*i).is_some_and(|point| point.fixed && point.link.is_none()) && owners.get(i.0) == Some(&1)) => {
+                }
                 _ => return Err(bad("invalid offset output point roles")),
             }
         }
@@ -477,7 +478,7 @@ impl Sketch {
         let mut candidate = self.clone();
         let indices = points.iter().map(|p| candidate.add_point(*p, None)).collect::<Result<Vec<_>>>()?;
         for i in &indices {
-            if let Some(p) = candidate.spoint_mut(*i) {
+            if let Some(p) = candidate.points.get_mut(*i) {
                 p.fixed = true;
             }
         }
@@ -576,7 +577,7 @@ impl Sketch {
                 indices.push(index);
             }
             for (i, pos) in indices.iter().zip(points) {
-                let p = candidate.spoint_mut(*i).ok_or_else(|| bad("offset output point vanished"))?;
+                let p = candidate.points.get_mut(*i).ok_or_else(|| bad("offset output point vanished"))?;
                 p.pos = pos;
                 p.fixed = true;
             }
@@ -636,7 +637,7 @@ mod tests {
             let mut sk = original.clone();
             let output = sk.add_freeform_offset(source, forward, distance).unwrap();
             assert_eq!(sk.freeform_offsets[0].divisions, 32);
-            assert_eq!(&sk.points[..original.points.len()], &original.points);
+            assert_eq!(&sk.points.as_slice()[..original.points.len()], original.points.as_slice());
             assert_eq!(sk.curves[source], original.curves[source]);
             let exact = sk.exact_segs(source).unwrap();
             let fitted = sk.exact_segs(output).unwrap();

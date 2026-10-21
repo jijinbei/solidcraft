@@ -96,7 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("|---|---|---|---|");
     for n in [30usize, 100] {
         let (mut sk, corner) = strip(n)?;
-        if let Some(p) = sk.spoint_mut(corner) {
+        if let Some(p) = sk.points.get_mut(corner) {
             p.pos -= Vec2::new(0.5, 0.0);
         }
         let hold = Hold { points: vec![corner], radii: vec![] };

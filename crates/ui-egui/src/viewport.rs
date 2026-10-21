@@ -3288,7 +3288,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         .curve_index(id)
                         .and_then(|i| sk.curve(i))
                         .and_then(|c| c.link.as_deref())
-                        .or_else(|| sk.resolve_point(id).and_then(|i| sk.spoint(i)).and_then(|p| p.link.as_deref()))?;
+                        .or_else(|| sk.resolve_point(id).and_then(|i| sk.points.get(i)).and_then(|p| p.link.as_deref()))?;
                     sk.link(link).filter(|l| l.kind == solidcraft_engine::sketch::LinkKind::Text).map(|l| l.id.clone())
                 });
                 if let Some(link) = link
@@ -3825,7 +3825,7 @@ fn dragged_with(app: &SolveApp, id: &str) -> Vec<String> {
         .and_then(|ss| {
             let sk = &ss.sketch;
             let c = sk.curve(sk.curve_index(id)?)?;
-            Some(c.kind.point_ids().into_iter().filter_map(|p| sk.spoint(p).map(|p| p.id.as_str())).collect())
+            Some(c.kind.point_ids().into_iter().filter_map(|p| sk.points.get(p).map(|p| p.id.as_str())).collect())
         })
         .unwrap_or_default();
     if rest.iter().all(|r| own.contains(&r.as_str())) {
@@ -4164,8 +4164,8 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
         }
         let used: std::collections::HashSet<PointIdx> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
         let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
-        for (i, p) in sk.points.iter().enumerate().skip(1) {
-            if !used.contains(&PointIdx(i)) && p.link.is_none() && visible.takes(p) {
+        for (i, p) in sk.points.iter_enumerated().skip(1) {
+            if !used.contains(&i) && p.link.is_none() && visible.takes(p) {
                 out.push(ss.plane.to_world(p.pos));
             }
         }

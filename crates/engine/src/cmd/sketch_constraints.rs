@@ -168,9 +168,8 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
         }
     };
     // Coincident points.
-    let np = sk.points.len();
-    for i in (0..np).map(PointIdx) {
-        for j in (i.0 + 1..np).map(PointIdx) {
+    for i in sk.points.indices() {
+        for j in sk.points.indices().skip(i.0 + 1) {
             let (Some(a), Some(b)) = (sk.point(i), sk.point(j)) else { continue };
             if a.dist(b) <= tol {
                 attempt(sk, doc, Coincident { p: i, q: j }, false, &mut dof);
@@ -232,7 +231,7 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
         }
         // Positions from the datum.
         let d = sk.point(datum).unwrap_or_default();
-        for i in (0..sk.points.len()).map(PointIdx) {
+        for i in sk.points.indices() {
             if i == datum {
                 continue;
             }

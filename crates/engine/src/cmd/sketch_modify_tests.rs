@@ -1008,7 +1008,7 @@ fn irregular_closed_spline_offset_certificate_edits_undoes_and_reopens() {
         let state = s.world_state();
         let sk = &state.sketch(1).unwrap().sketch;
         assert_eq!(sk.curves[0], original.curves[0]);
-        assert_eq!(&sk.points[..original.points.len()], &original.points);
+        assert_eq!(&sk.points.as_slice()[..original.points.len()], original.points.as_slice());
         let index = sk.curve_index(&output).unwrap();
         assert_eq!(sk.curves[index].kind.point_ids(), point_ids);
         assert!(matches!(sk.curves[index].kind, CurveKind::Spline { periodic: true, .. }));
@@ -1131,7 +1131,7 @@ fn periodic_closed_offset_chain_break_drag_reopen_and_material_volume() {
     let a = run(&mut s, "sketch.offset", json!({"curves":["e1"],"distance":-1,"chain":false}))["curves"][0].as_str().unwrap().to_string();
     let before_second = s.doc.to_json();
     let b = run(&mut s, "sketch.offset", json!({"curves":[a],"distance":-0.5,"chain":false}))["curves"][0].as_str().unwrap().to_string();
-    assert_eq!(&sketch(&s).points[..source.len()], source.as_slice());
+    assert_eq!(&sketch(&s).points.as_slice()[..source.len()], source.as_slice());
     let check = |session: &Session| {
         let sk = sketch(session);
         assert_eq!(sk.freeform_offsets.iter().map(|r| r.certificate).collect::<Vec<_>>(), [2, 2]);

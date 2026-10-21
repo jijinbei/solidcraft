@@ -286,7 +286,7 @@ fn indices_save_as_plain_numbers() {
     assert_eq!(saved["constraints"][0]["l"], 0);
     let back: Sketch = serde_json::from_value(saved).unwrap();
     assert_eq!(back.curve(CurveIdx(0)).map(|c| c.id.as_str()), Some("l1"));
-    assert_eq!(back.spoint(PointIdx(2)).map(|p| p.id.as_str()), Some("l1.end"));
+    assert_eq!(back.points.get(PointIdx(2)).map(|p| p.id.as_str()), Some("l1.end"));
     assert!(back.curve(CurveIdx(1)).is_none());
 }
 

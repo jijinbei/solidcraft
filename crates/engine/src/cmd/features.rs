@@ -2108,7 +2108,7 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
             solidcraft_sketch::CurveKind::Conic { a, b, apex, .. } => ends.extend([*a, *b, *apex]),
         }
     }
-    ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !ends.contains(&PointIdx(*i))).map(|(_, p)| p.id.clone()).collect()
+    ss.sketch.points.iter_enumerated().filter(|(i, p)| p.id != "origin" && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
 }
 
 fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {

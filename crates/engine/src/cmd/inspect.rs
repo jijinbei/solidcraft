@@ -152,7 +152,7 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         .map(|(i, c)| {
             let det = ss.report.curve_determined.get(i).copied().unwrap_or(false);
             let i = CurveIdx(i);
-            let pid = |k: PointIdx| sk.spoint(k).map(|p| p.id.clone()).unwrap_or_default();
+            let pid = |k: PointIdx| sk.points.get(k).map(|p| p.id.clone()).unwrap_or_default();
             let mut v = match c.kind {
                 CurveKind::Line { a, b } => json!({"id": c.id, "type": "line", "start": pid(a), "end": pid(b), "start_at": sk.point(a), "end_at": sk.point(b), "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
                 CurveKind::Circle { c: cc, r } => json!({"id": c.id, "type": "circle", "center": pid(cc), "center_at": sk.point(cc), "radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),

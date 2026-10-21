@@ -671,9 +671,8 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             let points = sketch
                 .sketch
                 .points
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| if old_points.contains(p.id.as_str()) { None } else { Some(PointIdx(i)) })
+                .iter_enumerated()
+                .filter_map(|(i, p)| if old_points.contains(p.id.as_str()) { None } else { Some(i) })
                 .collect::<Vec<_>>();
             if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
         })

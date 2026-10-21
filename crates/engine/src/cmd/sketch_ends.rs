@@ -19,7 +19,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 fn point_id(sk: &Sketch, i: PointIdx) -> Value {
-    sk.spoint(i).map_or(Value::Null, |p| json!(p.id))
+    sk.points.get(i).map_or(Value::Null, |p| json!(p.id))
 }
 
 fn curve_id(sk: &Sketch, i: CurveIdx) -> Value {

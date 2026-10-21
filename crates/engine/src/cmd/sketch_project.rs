@@ -241,7 +241,7 @@ pub(super) fn add_link(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, ki
 
 fn link_json(sk: &Sketch, link: &str) -> Value {
     let curves: Vec<String> = sk.link_curves(link).iter().filter_map(|c| sk.curve(*c).map(|c| c.id.clone())).collect();
-    let points: Vec<String> = sk.link_points(link).iter().filter_map(|p| sk.spoint(*p).map(|p| p.id.clone())).collect();
+    let points: Vec<String> = sk.link_points(link).iter().filter_map(|p| sk.points.get(*p).map(|p| p.id.clone())).collect();
     json!({"link": link, "curves": curves, "points": points})
 }
 
@@ -470,18 +470,18 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             };
             let pi = sk.add_point(at, None)?;
             sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c }, None)?;
-            sk.spoint(pi).map(|q| q.id.clone()).unwrap_or_default()
+            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
         } else if let Some(line) = mid {
             // "mid:<line>": a new point at the line's midpoint, kept there.
             let l = sk.curve_index(&line).ok_or_else(|| bad(cmd, format!("unknown curve `{line}`")))?;
             let Some(solidcraft_sketch::Shape::Line { a, b }) = sk.shape(l) else { return Err(bad(cmd, format!("`{line}` is not a line"))) };
             let pi = sk.add_point((a + b) * 0.5, None)?;
             sk.add_constraint(ConstraintKind::Midpoint { p: pi, l }, None)?;
-            sk.spoint(pi).map(|q| q.id.clone()).unwrap_or_default()
+            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
         } else if let Some(at) = vertex {
             let l = add_link(s, d, id, sk, LinkKind::Project, LinkSource::Vertex { body, at }).map_err(|e| bad(cmd, format!("vertex: {e}")))?;
             let pi = sk.link_points(&l).first().copied().ok_or_else(|| bad(cmd, "vertex projects to nothing"))?;
-            sk.spoint(pi).map(|q| q.id.clone()).unwrap_or_default()
+            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
         } else if let Some(at) = edge {
             let l = add_link(s, d, id, sk, LinkKind::Project, LinkSource::Edge { body, at }).map_err(|e| bad(cmd, format!("edge: {e}")))?;
             let before = s.model.state_before(id);
@@ -490,7 +490,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             let ci = sk.link_curves(&l).first().copied().ok_or_else(|| bad(cmd, "the edge projects to a point"))?;
             let pi = sk.add_point(q, None)?;
             sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: ci }, None)?;
-            sk.spoint(pi).map(|q| q.id.clone()).unwrap_or_default()
+            sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
         } else {
             return Ok(());
         };

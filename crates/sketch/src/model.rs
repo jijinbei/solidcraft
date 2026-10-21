@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb2, Seg2, Vec2, Vec3};
+use solidcraft_geom::{Aabb2, Idx, IndexVec, Seg2, Vec2, Vec3};
 
 use crate::union_find::{find, union};
 
@@ -70,16 +70,12 @@ impl std::fmt::Display for CurveIdx {
     }
 }
 
-impl std::ops::Index<PointIdx> for Vec<SPoint> {
-    type Output = SPoint;
-    fn index(&self, i: PointIdx) -> &SPoint {
-        &self[i.0]
+impl Idx for PointIdx {
+    fn new(i: usize) -> Self {
+        PointIdx(i)
     }
-}
-
-impl std::ops::IndexMut<PointIdx> for Vec<SPoint> {
-    fn index_mut(&mut self, i: PointIdx) -> &mut SPoint {
-        &mut self[i.0]
+    fn index(self) -> usize {
+        self.0
     }
 }
 
@@ -676,7 +672,7 @@ pub struct SketchView {
 /// A 2D sketch. Point 0 is always the fixed sketch origin (id `origin`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
-    pub points: Vec<SPoint>,
+    pub points: IndexVec<PointIdx, SPoint>,
     pub curves: Vec<Curve>,
     pub constraints: Vec<Constraint>,
     /// Editable sketch patterns; their relations are ordinary solver constraints.
@@ -714,7 +710,7 @@ impl Default for Sketch {
 impl Sketch {
     pub fn new() -> Self {
         Sketch {
-            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None }],
+            points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None }].into(),
             curves: Vec::new(),
             constraints: Vec::new(),
             patterns: Vec::new(),
@@ -792,13 +788,7 @@ impl Sketch {
         self.curves.iter().position(|c| c.id == id).map(CurveIdx)
     }
     pub fn point(&self, p: PointIdx) -> Option<Vec2> {
-        self.points.get(p.0).map(|p| p.pos)
-    }
-    pub fn spoint(&self, p: PointIdx) -> Option<&SPoint> {
-        self.points.get(p.0)
-    }
-    pub fn spoint_mut(&mut self, p: PointIdx) -> Option<&mut SPoint> {
-        self.points.get_mut(p.0)
+        self.points.get(p).map(|p| p.pos)
     }
     pub fn curve(&self, c: CurveIdx) -> Option<&Curve> {
         self.curves.get(c.0)
@@ -823,8 +813,7 @@ impl Sketch {
             Some(i) => i.to_string(),
             None => self.fresh("p")?,
         };
-        self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None });
-        Ok(PointIdx(self.points.len() - 1))
+        Ok(self.points.push(SPoint { id, pos: p, fixed: false, link: None, exprs: None }))
     }
 
     pub(crate) fn curve_id(&mut self, id: Option<&str>, prefix: &str) -> Result<String> {
@@ -1139,7 +1128,7 @@ impl Sketch {
     /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a
     /// point of a fixed curve.
     pub fn point_locked(&self, i: PointIdx) -> bool {
-        self.spoint(i).is_some_and(|p| p.fixed || p.link.is_some())
+        self.points.get(i).is_some_and(|p| p.fixed || p.link.is_some())
             || self.constraints.iter().any(|c| c.kind == ConstraintKind::Fix { p: i })
             || self.curves.iter().any(|c| c.fixed && c.kind.uses(i))
     }
@@ -1256,11 +1245,10 @@ impl Sketch {
             }
         }
         let mut out = Vec::new();
-        for (i, on) in incidence.into_iter().enumerate().skip(1) {
+        for (i, on) in self.points.indices().zip(incidence).skip(1) {
             if on.len() < 2 {
                 continue;
             }
-            let i = PointIdx(i);
             let Some(p) = self.point(i) else { continue };
             let mut ext = Vec::new();
             for c in on {
@@ -1613,26 +1601,22 @@ impl Sketch {
             }
         }
         let gone = |p: PointIdx| removed.contains(&p);
-        let mut pmap = vec![None; self.points.len()];
+        let mut pmap: IndexVec<PointIdx, Option<PointIdx>> = vec![None; self.points.len()].into();
         let mut n = 0;
-        for (i, slot) in pmap.iter_mut().enumerate() {
-            if !gone(PointIdx(i)) {
+        for (i, slot) in pmap.iter_enumerated_mut() {
+            if !gone(i) {
                 *slot = Some(PointIdx(n));
                 n += 1;
             }
         }
-        let pm = |i: PointIdx| pmap.get(i.0).copied().flatten();
+        let pm = |i: PointIdx| pmap.get(i).copied().flatten();
         for c in &mut self.curves {
             c.kind.map_points(&|i| pm(i).unwrap_or(PointIdx::ORIGIN));
         }
         let cm = |i: CurveIdx| Some(i);
         self.constraints.retain_mut(|c| c.kind.remap(&pm, &cm));
-        let mut idx = 0;
-        self.points.retain(|_| {
-            let k = !gone(PointIdx(idx));
-            idx += 1;
-            k
-        });
+        let mut kept = pmap.iter().map(Option::is_some);
+        self.points.retain(|_| kept.next().unwrap_or(false));
         self.prune_links();
         self.prune_patterns();
     }

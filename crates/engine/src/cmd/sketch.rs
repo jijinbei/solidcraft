@@ -397,10 +397,10 @@ fn connect_points(sk: &mut Sketch, first: usize, p: &Value) -> Result<Vec<String
         return Ok(Vec::new());
     }
     // The existing points by x, for a range lookup per new point.
-    let mut old: Vec<(Vec2, PointIdx)> = (0..first.min(sk.points.len())).map(PointIdx).filter_map(|i| Some((sk.point(i)?, i))).collect();
+    let mut old: Vec<(Vec2, PointIdx)> = sk.points.indices().take(first).filter_map(|i| Some((sk.point(i)?, i))).collect();
     old.sort_by(|a, b| a.0.x.total_cmp(&b.0.x));
     let mut ties = Vec::new();
-    for q in (first..sk.points.len()).map(PointIdx) {
+    for q in sk.points.indices().skip(first) {
         let Some(at) = sk.point(q) else { continue };
         let from = old.partition_point(|(o, _)| o.x < at.x - CONNECT_TOL);
         let hit =
@@ -498,7 +498,7 @@ pub(super) fn expr_point(doc: &solidcraft_doc::Document, v: &Value, cmd: &str) -
 /// again whenever the parameters change.
 pub(super) fn add_placed_point(sk: &mut Sketch, at: Vec2, exprs: PointExprs, id: Option<&str>) -> Result<PointIdx> {
     let i = sk.add_point(at, id)?;
-    if let Some(q) = sk.spoint_mut(i) {
+    if let Some(q) = sk.points.get_mut(i) {
         q.fixed = true;
         q.exprs = Some(Box::new(exprs));
     }
@@ -1038,7 +1038,7 @@ fn drop_implied_axes(sk: &mut Sketch, cons: &mut Vec<String>) {
 /// caller can dimension it without inspecting the sketch first.
 fn rect_names(sk: &Sketch, l: &[CurveIdx], pts: &[PointIdx]) -> Value {
     let curve = |i: usize| l.get(i).and_then(|c| sk.curve(*c)).map(|c| c.id.clone());
-    let point = |i: usize| pts.get(i).and_then(|q| sk.spoint(*q)).map(|q| q.id.clone());
+    let point = |i: usize| pts.get(i).and_then(|q| sk.points.get(*q)).map(|q| q.id.clone());
     json!({
         "sides": {"bottom": curve(0), "right": curve(1), "top": curve(2), "left": curve(3)},
         "corners": {"bottom_left": point(0), "bottom_right": point(1), "top_right": point(2), "top_left": point(3)},
@@ -1475,7 +1475,7 @@ fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
             None => sk.add_point(req_vec2(cmd, p, "point")?, id.as_deref())?,
         };
         let cons = connect_points(sk, i.0, p)?;
-        Ok((sk.spoint(i).map(|q| q.id.clone()).unwrap_or_default(), cons))
+        Ok((sk.points.get(i).map(|q| q.id.clone()).unwrap_or_default(), cons))
     })?;
     Ok(json!({"point": pid, "constraints": cons, "sketch": info}))
 }
@@ -2196,7 +2196,7 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
         let fix = want.unwrap_or(!all_fixed);
         let mut n = 0;
         for q in pts {
-            let own = sk.spoint(q).is_some_and(|x| x.fixed || x.link.is_some());
+            let own = sk.points.get(q).is_some_and(|x| x.fixed || x.link.is_some());
             if q == PointIdx::ORIGIN || own {
                 continue;
             }
@@ -2794,7 +2794,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             sk.refresh_offsets()?;
         }
         sk.constraints.retain(|c| !cons.contains(&c.id));
-        let pids: Vec<String> = points.iter().filter_map(|q| sk.spoint(*q).map(|x| x.id.clone())).collect();
+        let pids: Vec<String> = points.iter().filter_map(|q| sk.points.get(*q).map(|x| x.id.clone())).collect();
         sk.remove_curves(&curves);
         let pidx: Vec<PointIdx> = pids.iter().filter_map(|id| sk.point_index(id)).collect();
 

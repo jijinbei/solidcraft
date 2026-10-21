@@ -107,7 +107,7 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
                 None => {}
             }
         } else if let Some(q) = sk.resolve_point(e) {
-            match sk.spoint(q).and_then(|x| x.link.as_deref()).and_then(|l| sk.link(l)).filter(|l| l.kind == LinkKind::Text) {
+            match sk.points.get(q).and_then(|x| x.link.as_deref()).and_then(|l| sk.link(l)).filter(|l| l.kind == LinkKind::Text) {
                 Some(l) if !texts.contains(&l.id) => texts.push(l.id.clone()),
                 Some(_) => {}
                 None if !ps.contains(&q) => ps.push(q),
@@ -310,7 +310,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             let link = sk.add_link(LinkKind::Text, src, &geom)?;
             curve_ids.extend(sk.link_curves(&link).into_iter().filter_map(|i| sk.curve(i).map(|c| c.id.clone())));
         }
-        let lone: Vec<String> = clip.lone.iter().filter_map(|n| pts.get(n.0)).filter_map(|i| sk.spoint(*i).map(|q| q.id.clone())).collect();
+        let lone: Vec<String> = clip.lone.iter().filter_map(|n| pts.get(n.0)).filter_map(|i| sk.points.get(*i).map(|q| q.id.clone())).collect();
         Ok((curve_ids, lone, cons))
     })?;
     if !positioned

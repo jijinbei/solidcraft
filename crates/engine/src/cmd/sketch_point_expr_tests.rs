@@ -84,7 +84,7 @@ fn a_placed_point_is_fixed_listed_with_its_parameters_and_renamed_with_them() {
     run(&mut s, "parameters.change", json!({"name": "W", "expression": "100 mm"}));
     assert_eq!(solved(&s, "c"), Vec2::new(50.0, 10.0));
     let centre = s.doc.sketch(f).unwrap().curves.iter().find(|c| c.id == "hole").map(|c| c.kind.point_ids()).unwrap_or_default();
-    let centre_id = s.doc.sketch(f).unwrap().spoint(centre[0]).unwrap().id.clone();
+    let centre_id = s.doc.sketch(f).unwrap().points.get(centre[0]).unwrap().id.clone();
     assert_eq!(solved(&s, &centre_id), Vec2::new(25.0, 5.0));
     // The parameter knows the point uses it; a rename reaches the expression.
     let users = run(&mut s, "parameters.users", json!({"name": "H"}));

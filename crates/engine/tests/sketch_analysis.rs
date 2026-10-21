@@ -70,14 +70,14 @@ fn a_live_drag_keeps_full_diagnostics_when_it_publishes_without_evaluation() {
             s.model.state().sketch(id).unwrap().report.redundant.contains(&redundant),
             "the pre-drag model must contain the fixture's full diagnostics"
         );
-        let endpoint = s.doc.sketch(id).unwrap().points[1].id.clone();
+        let endpoint = s.doc.sketch(id).unwrap().points[PointIdx(1)].id.clone();
         s.execute("sketch.drag", &json!({"entity": endpoint, "from": [10, 0], "to": [12, 8], "live": true})).unwrap();
         let state = s.model.state();
         let shown = state.sketch(id).unwrap();
         assert!(shown.report.redundant.contains(&redundant));
         assert_eq!(shown.report.dof, usize::from(!horizontal));
         if !horizontal {
-            assert!(s.doc.sketch(id).unwrap().points[1].pos.dist(Vec2::new(10.0, 0.0)) > 1.0, "exercise publication of changed geometry");
+            assert!(s.doc.sketch(id).unwrap().points[PointIdx(1)].pos.dist(Vec2::new(10.0, 0.0)) > 1.0, "exercise publication of changed geometry");
         }
     }
 }

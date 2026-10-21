@@ -61,7 +61,7 @@ fn distances(sk: &Sketch) -> Vec<f64> {
 
 /// Turn of both triangles (layout point `i` is sketch point `i + 1`, after the origin).
 fn turns(sk: &Sketch) -> [bool; 2] {
-    let p = |i: usize| sk.points[i + 1].pos;
+    let p = |i: usize| sk.points[PointIdx(i + 1)].pos;
     [(p(1) - p(0)).cross(p(2) - p(0)) > 0.0, (p(4) - p(3)).cross(p(5) - p(3)) > 0.0]
 }
 

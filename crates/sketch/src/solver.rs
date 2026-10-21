@@ -2289,7 +2289,7 @@ fn solve_inner(
     let has_periodic = sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Spline { periodic: true, .. }));
     let periodic_positions = if has_periodic {
         let state = State { sk, lay: &lay, x: &x };
-        let mut positions = (0..sk.points.len()).map(|i| state.p(PointIdx(i))).collect::<Vec<_>>();
+        let mut positions = sk.points.indices().map(|i| state.p(i)).collect::<Vec<_>>();
         let mut parent = (0..positions.len()).collect::<Vec<_>>();
         for curve in &sk.curves {
             if let CurveKind::Spline { pts, periodic: true, .. } = &curve.kind
@@ -2383,7 +2383,7 @@ fn solve_inner(
     let (dof, point_determined, curve_determined) = match analysis {
         Analysis::Full | Analysis::Freedom => (
             lay.n.saturating_sub(rank),
-            (0..sk.points.len()).map(|i| pdet(PointIdx(i))).collect(),
+            sk.points.indices().map(pdet).collect(),
             sk.curves.iter().enumerate().map(|(i, c)| c.kind.point_ids().into_iter().all(pdet) && vdet(lay.radius_var(CurveIdx(i)))).collect(),
         ),
         Analysis::StatusOnly => (0, Vec::new(), Vec::new()),

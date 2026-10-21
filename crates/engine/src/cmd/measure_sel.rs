@@ -350,7 +350,7 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
                 _ => (given, id.as_str()),
             };
             let ss = sketch_of(s, &st, given, |sk| sk.point_index(id).is_some())?;
-            let p = ss.plane.to_world(ss.sketch.spoint(ss.sketch.point_index(id)?)?.pos);
+            let p = ss.plane.to_world(ss.sketch.points.get(ss.sketch.point_index(id)?)?.pos);
             Some(Item {
                 geo: Geo::Points(vec![p]),
                 dir: None,

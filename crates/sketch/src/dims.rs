@@ -167,8 +167,8 @@ pub fn chain_centres(sk: &Sketch) -> Vec<Vec2> {
     }
     let mut sum = vec![(Vec2::ZERO, 0usize); n];
     let roots: Vec<usize> = (0..n).map(|i| find(&mut parent, i)).collect();
-    for (i, r) in roots.iter().enumerate() {
-        if let (Some(s), Some(p)) = (sum.get_mut(*r), sk.points.get(i)) {
+    for (p, r) in sk.points.iter().zip(&roots) {
+        if let Some(s) = sum.get_mut(*r) {
             s.0 += p.pos;
             s.1 += 1;
         }

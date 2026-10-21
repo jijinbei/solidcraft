@@ -93,7 +93,7 @@ impl Sketch {
         for index in points {
             if index != PointIdx::ORIGIN
                 && self.curves.iter().all(|curve| !curve.kind.uses(index) || released.contains(&curve.id))
-                && let Some(point) = self.spoint_mut(index)
+                && let Some(point) = self.points.get_mut(index)
             {
                 point.fixed = false;
             }
@@ -228,7 +228,7 @@ impl Sketch {
                     _ => return Err(bad()),
                 };
                 for (pi, pos) in [(pa, a), (pb, b)] {
-                    if let Some(p) = self.spoint_mut(pi) {
+                    if let Some(p) = self.points.get_mut(pi) {
                         p.pos = pos;
                         p.fixed = true;
                     }

@@ -305,7 +305,7 @@ pub(super) fn text_link<'a>(sk: &'a Sketch, entity: &str) -> Option<&'a str> {
         .curve_index(entity)
         .and_then(|i| sk.curve(i))
         .and_then(|c| c.link.as_deref())
-        .or_else(|| sk.resolve_point(entity).and_then(|i| sk.spoint(i)).and_then(|p| p.link.as_deref()))?;
+        .or_else(|| sk.resolve_point(entity).and_then(|i| sk.points.get(i)).and_then(|p| p.link.as_deref()))?;
     sk.link(link).filter(|source| source.kind == LinkKind::Text).map(|source| source.id.as_str())
 }
 
@@ -774,9 +774,8 @@ fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
         // point, lying on the end of the curve that trimmed it, which is the one a click picks (#1485).
         let at = st.pos();
         let tol = 1e-6 * at.len().max(1.0);
-        let candidates: Vec<PointIdx> = std::iter::once(picked)
-            .chain((0..sk.points.len()).map(PointIdx).filter(|&q| q != picked && sk.point(q).is_some_and(|x| x.dist(at) <= tol)))
-            .collect();
+        let candidates: Vec<PointIdx> =
+            std::iter::once(picked).chain(sk.points.indices().filter(|&q| q != picked && sk.point(q).is_some_and(|x| x.dist(at) <= tol))).collect();
 
         let (ci, pi) = match str_(p, "curve") {
             Some(id) => {
@@ -1011,10 +1010,8 @@ fn arc_slot_center(s: &mut Session, p: &Value) -> Result<Value> {
 /// back to leaving everything to the normal solve.
 pub(super) fn solve_new_only(sk: &mut Sketch, first_new: usize) {
     let mut trial = sk.clone();
-    for (i, p) in trial.points.iter_mut().enumerate() {
-        if i < first_new {
-            p.fixed = true;
-        }
+    for p in trial.points.iter_mut().take(first_new) {
+        p.fixed = true;
     }
     if solidcraft_sketch::solve(&mut trial).ok() {
         for (p, t) in sk.points.iter_mut().zip(&trial.points).skip(first_new) {

@@ -110,7 +110,7 @@ pub(crate) fn seed(
 ) -> Seed {
     let n = sk.points.len();
     let reference = reference.filter(|r| r.len() <= n);
-    let before = |i: usize| match reference.and_then(|r| r.get(i)) {
+    let before = |i: PointIdx| match reference.and_then(|r| r.get(i.0)) {
         Some(p) => Some(*p),
         None => sk.points.get(i).map(|p| p.pos),
     };

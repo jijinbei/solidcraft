@@ -723,14 +723,13 @@ pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool
     let ss = st.sketch(active_sketch(app)?)?;
     let sk = &ss.sketch;
     sk.points
-        .iter()
-        .enumerate()
+        .iter_enumerated()
         .filter_map(|(pi, point)| {
             let distance = proj.to_screen(ss.plane.to_world(point.pos))?.distance(pos);
             if distance >= 8.0 {
                 return None;
             }
-            corner_curves(sk, PointIdx(pi), arcs_ok)?;
+            corner_curves(sk, pi, arcs_ok)?;
             Some((distance, point.pos, point.id.clone()))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))

@@ -74,7 +74,7 @@ impl Path {
     /// Put the dragged geometry where it is at `t` along the drag.
     fn apply(&self, sk: &mut Sketch, t: f64) {
         let mut set = |q: PointIdx, at: Vec2| {
-            if let Some(pt) = sk.spoint_mut(q) {
+            if let Some(pt) = sk.points.get_mut(q) {
                 pt.pos = at;
             }
         };
