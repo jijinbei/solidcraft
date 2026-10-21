@@ -8,7 +8,7 @@ use serde_json::json;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::{Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
-use solidcraft_engine::sketch::{CurveIdx, CurveKind, PointIdx};
+use solidcraft_engine::sketch::{CurveKind, PointIdx};
 use solidcraft_engine::view::{GridPlane, colors, grid_plane, grid_step, sketch_lines_with_sampler};
 use std::hash::{Hash, Hasher};
 
@@ -1524,8 +1524,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     for sid in visible_sketches(app) {
         let Some(ss) = st.sketch(sid) else { continue };
         let bonus = if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
-        for (i, c) in ss.sketch.curves.iter().enumerate() {
-            let i = CurveIdx(i);
+        for (i, c) in ss.sketch.curves.iter_enumerated() {
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
                 continue;
             }
@@ -2508,7 +2507,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
                     for pts in &crate::sketch_display::curve_sample(app, *sketch, ci, &ss.plane, &display_proj(app)).parts {
-                        let mode = ss.sketch.curve(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
+                        let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
                             feedback.line(a.to_f32(), b.to_f32(), c4(t.sel_edge), 3.5, true);
                         }
@@ -2535,7 +2534,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     && let Some(ci) = ss.sketch.curve_index(id)
                 {
                     for pts in &crate::sketch_display::curve_sample(app, ss.feature, ci, &ss.plane, &display_proj(app)).parts {
-                        let mode = ss.sketch.curve(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
+                        let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                         for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
                             feedback.line(a.to_f32(), b.to_f32(), c4(t.sel_edge), 3.5, true);
                         }
@@ -3286,7 +3285,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let link = app.session.active_sketch.and_then(|sid| app.session.doc.sketch(sid).ok()).and_then(|sk| {
                     let link = sk
                         .curve_index(id)
-                        .and_then(|i| sk.curve(i))
+                        .and_then(|i| sk.curves.get(i))
                         .and_then(|c| c.link.as_deref())
                         .or_else(|| sk.resolve_point(id).and_then(|i| sk.points.get(i)).and_then(|p| p.link.as_deref()))?;
                     sk.link(link).filter(|l| l.kind == solidcraft_engine::sketch::LinkKind::Text).map(|l| l.id.clone())
@@ -3824,7 +3823,7 @@ fn dragged_with(app: &SolveApp, id: &str) -> Vec<String> {
         .and_then(|s| st.sketch(s))
         .and_then(|ss| {
             let sk = &ss.sketch;
-            let c = sk.curve(sk.curve_index(id)?)?;
+            let c = sk.curves.get(sk.curve_index(id)?)?;
             Some(c.kind.point_ids().into_iter().filter_map(|p| sk.points.get(p).map(|p| p.id.as_str())).collect())
         })
         .unwrap_or_default();
@@ -3933,13 +3932,12 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     {
         // What the selection filter lets through (window: wholly inside; crossing: touching).
         let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
-        for (i, c) in ss.sketch.curves.iter().enumerate().filter(|_| !off("sketch") && !off("sketch_curves")) {
+        for (i, c) in ss.sketch.curves.iter_enumerated().filter(|_| !off("sketch") && !off("sketch_curves")) {
             if accepts
                 .is_some_and(|a| a & crate::selection::CURVES == 0 && (a & crate::selection::AXES == 0 || !matches!(c.kind, CurveKind::Line { .. })))
             {
                 continue;
             }
-            let i = CurveIdx(i);
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
                 continue;
             }
@@ -4130,7 +4128,7 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 && let Some(ci) = ss.sketch.curve_index(id)
             {
                 for part in &crate::sketch_display::curve_sample(app, *sketch, ci, &ss.plane, proj).parts {
-                    let mode = ss.sketch.curve(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
+                    let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
                     crate::tools::paint_sketch_path(part, mode, painter, proj, Stroke::new(3.0, col));
                 }
             }

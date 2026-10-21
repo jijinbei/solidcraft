@@ -660,7 +660,7 @@ fn corner_ref(app: &SolveApp, point: &str, flip: bool) -> Result<Value, String> 
     let sk = &state.sketch(sketch).ok_or_else(gone)?.sketch;
     let index = sk.resolve_point(point).ok_or_else(gone)?;
     let (a, b) = crate::sketch_tools::corner_curves(sk, index, false).ok_or("a chamfer needs a corner of exactly two lines")?;
-    let id = |c: CurveIdx| sk.curve(c).map(|x| x.id.clone()).ok_or_else(gone);
+    let id = |c: CurveIdx| sk.curves.get(c).map(|x| x.id.clone()).ok_or_else(gone);
     Ok(json!({"a": id(b)?, "b": id(a)?}))
 }
 

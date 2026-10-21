@@ -248,8 +248,7 @@ fn sketch_lines_in(
     p: &Palette,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
-    for (i, c) in sk.curves.iter().enumerate() {
-        let i = CurveIdx(i);
+    for (i, c) in sk.curves.iter_enumerated() {
         if !sketch_curve_visible(sk, i) {
             continue;
         }
@@ -305,7 +304,7 @@ fn sketch_lines_in(
 /// Drawing and picking share this one answer so they cannot drift: geometry that is not on
 /// screen is never clickable, and geometry on screen always is.
 pub fn sketch_curve_visible(sk: &Sketch, i: CurveIdx) -> bool {
-    let Some(c) = sk.curve(i) else { return false };
+    let Some(c) = sk.curves.get(i) else { return false };
     if c.link.is_some() && !sk.is_text_curve(i) {
         return !sk.view.hide_projected;
     }

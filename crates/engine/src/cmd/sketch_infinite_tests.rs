@@ -20,7 +20,7 @@ fn sketch(s: &Session) -> Sketch {
 }
 
 fn curve<'a>(sk: &'a Sketch, id: &str) -> &'a solidcraft_sketch::Curve {
-    sk.curve(sk.curve_index(id).unwrap()).unwrap()
+    sk.curves.get(sk.curve_index(id).unwrap()).unwrap()
 }
 
 fn new_sketch() -> Session {

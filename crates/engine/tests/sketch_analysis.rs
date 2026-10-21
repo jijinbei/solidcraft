@@ -5,7 +5,7 @@ use std::sync::Arc;
 use serde_json::json;
 use solidcraft_engine::Session;
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{Analysis, ConstraintKind, PointIdx, Sketch, profiling::capture};
+use solidcraft_sketch::{Analysis, ConstraintKind, CurveIdx, PointIdx, Sketch, profiling::capture};
 
 fn session(horizontal: bool) -> (Session, u64, String) {
     let mut s = Session::default();
@@ -149,7 +149,7 @@ fn document_analysis_levels_survive_parameter_application_and_offset_retries() {
                 .unwrap()
                 .to_owned()
         } else {
-            s.doc.sketch(id).unwrap().curves[0].id.clone()
+            s.doc.sketch(id).unwrap().curves[CurveIdx(0)].id.clone()
         };
         s.execute("sketch.offset", &json!({"curves": [curve], "distance": -1, "chain": false})).unwrap();
         let sk = s.doc.sketch(id).unwrap();

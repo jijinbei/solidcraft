@@ -85,7 +85,7 @@ fn c_polygon(s: &mut Session, p: &Value) -> Result<Value> {
             ids.iter().map(|i| sk.curve_index(i).ok_or_else(|| bad(cmd, format!("unknown curve `{i}`")))).collect::<Result<_>>()?;
         let mut corners: Vec<PointIdx> = Vec::new();
         for l in &ls {
-            match sk.curve(*l).map(|c| &c.kind) {
+            match sk.curves.get(*l).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => {
                     for q in [*a, *b] {
                         if !corners.contains(&q) {
@@ -103,7 +103,7 @@ fn c_polygon(s: &mut Session, p: &Value) -> Result<Value> {
         let c = pts.iter().fold(Vec2::ZERO, |a, q| a + *q) / pts.len() as f64;
         let r = pts.iter().map(|q| q.dist(c)).sum::<f64>() / pts.len() as f64;
         let circ = sk.add_circle(c, r.max(1e-6), None, None)?;
-        if let Some(cu) = sk.curve_mut(circ) {
+        if let Some(cu) = sk.curves.get_mut(circ) {
             cu.construction = true;
         }
         let mut cons = Vec::new();
@@ -179,7 +179,7 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
     // Horizontal / vertical lines, tangent line–arc and arc–arc joints.
     let nc = sk.curves.len();
     for i in (0..nc).map(CurveIdx) {
-        if let Some(CurveKind::Line { a, b }) = sk.curve(i).map(|c| c.kind.clone())
+        if let Some(CurveKind::Line { a, b }) = sk.curves.get(i).map(|c| c.kind.clone())
             && let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b))
         {
             let ang = (pb - pa).angle();
@@ -194,7 +194,7 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
     }
     for i in (0..nc).map(CurveIdx) {
         for j in (i.0 + 1..nc).map(CurveIdx) {
-            let (Some(ci), Some(cj)) = (sk.curve(i), sk.curve(j)) else { continue };
+            let (Some(ci), Some(cj)) = (sk.curves.get(i), sk.curves.get(j)) else { continue };
             let round = |k: &CurveKind| matches!(k, CurveKind::Arc { .. } | CurveKind::Circle { .. });
             if !(round(&ci.kind) || round(&cj.kind)) {
                 continue;
@@ -202,7 +202,7 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
             let (Some((a0, a1)), Some((b0, b1))) = (ci.kind.ends(), cj.kind.ends()) else { continue };
             let Some(sh) = [a0, a1].into_iter().find(|x| *x == b0 || *x == b1) else { continue };
             let dir = |c: CurveIdx| -> Option<Vec2> {
-                let k = sk.curve(c)?.kind.clone();
+                let k = sk.curves.get(c)?.kind.clone();
                 let q = sk.point(sh)?;
                 match k {
                     CurveKind::Line { a, b } => (sk.point(b)? - sk.point(a)?).normalized(),
@@ -219,7 +219,7 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
     }
     if dims {
         for i in (0..nc).map(CurveIdx) {
-            let k = match sk.curve(i).map(|c| (c.kind.clone(), c.construction)) {
+            let k = match sk.curves.get(i).map(|c| (c.kind.clone(), c.construction)) {
                 Some((CurveKind::Circle { r, .. }, false)) => Diameter { c: i, value: 2.0 * r },
                 Some((CurveKind::Arc { .. }, false)) => Radius { c: i, value: sk.radius(i).unwrap_or(1.0) },
                 Some((CurveKind::Line { a, b }, false)) => {
@@ -290,7 +290,7 @@ fn guess(sk: &Sketch, ents: &[String], cmd: &str) -> Result<ConstraintKind> {
         Some(solidcraft_sketch::Shape::Line { a, b }) => (b - a).normalized(),
         _ => None,
     };
-    let round = |c: CurveIdx| matches!(sk.curve(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+    let round = |c: CurveIdx| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
     match ents {
         [a] => {
             let (_, Some(c)) = ent(a)? else { return Err(bad(cmd, "pick a line, or two entities")) };
@@ -301,7 +301,7 @@ fn guess(sk: &Sketch, ents: &[String], cmd: &str) -> Result<ConstraintKind> {
             ((Some(p), _), (Some(q), _)) => Ok(Coincident { p, q }),
             ((Some(p), _), (_, Some(c))) | ((_, Some(c)), (Some(p), _)) => {
                 // A point at a curve's centre is concentric-like: coincident with the centre.
-                if let Some(cp) = sk.curve(c).and_then(|cu| match cu.kind {
+                if let Some(cp) = sk.curves.get(c).and_then(|cu| match cu.kind {
                     CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } => Some(c),
                     _ => None,
                 }) && sk.point(cp).zip(sk.point(p)).is_some_and(|(x, y)| x.dist(y) < sk.radius(c).unwrap_or(1.0) * 0.25)
@@ -442,7 +442,7 @@ fn anchor(sk: &Sketch, k: &ConstraintKind) -> Option<Vec2> {
         Parallel { a, .. } | Perpendicular { a, .. } | Collinear { a, .. } | Equal { a, .. } | Concentric { a, .. } | Angle { a, .. } => mid(a),
         Tangent { a, b } | Smooth { a, b } => {
             // At the shared end when there is one.
-            let ends = |c: CurveIdx| sk.curve(c).and_then(|c| c.kind.ends());
+            let ends = |c: CurveIdx| sk.curves.get(c).and_then(|c| c.kind.ends());
             match (ends(a), ends(b)) {
                 (Some((a0, a1)), Some((b0, b1))) => [a0, a1].into_iter().find(|x| *x == b0 || *x == b1).and_then(pt).or_else(|| mid(a)),
                 _ => mid(a),
@@ -509,8 +509,7 @@ fn snap(s: &mut Session, p: &Value) -> Result<Value> {
             out.push((d * 0.5, json!({"type": "coincident", "point": q.id, "at": q.pos})));
         }
     }
-    for (i, c) in sk.curves.iter().enumerate() {
-        let i = CurveIdx(i);
+    for (i, c) in sk.curves.iter_enumerated() {
         if let CurveKind::Line { a, b } = c.kind
             && let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b))
         {

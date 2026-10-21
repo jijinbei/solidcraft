@@ -240,7 +240,7 @@ pub(super) fn add_link(s: &Session, doc: &Document, id: u64, sk: &mut Sketch, ki
 }
 
 fn link_json(sk: &Sketch, link: &str) -> Value {
-    let curves: Vec<String> = sk.link_curves(link).iter().filter_map(|c| sk.curve(*c).map(|c| c.id.clone())).collect();
+    let curves: Vec<String> = sk.link_curves(link).iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
     let points: Vec<String> = sk.link_points(link).iter().filter_map(|p| sk.points.get(*p).map(|p| p.id.clone())).collect();
     json!({"link": link, "curves": curves, "points": points})
 }
@@ -375,7 +375,7 @@ fn fit_section(s: &mut Session, p: &Value) -> Result<Value> {
     let mut doc = (*s.doc).clone();
     let mut sk = doc.sketch(id)?.clone();
     let l = add_link(s, &doc, id, &mut sk, LinkKind::Intersect, LinkSource::Body { body }).map_err(|e| bad(cmd, e.to_string()))?;
-    let curves: Vec<String> = sk.link_curves(&l).iter().filter_map(|c| sk.curve(*c).map(|c| c.id.clone())).collect();
+    let curves: Vec<String> = sk.link_curves(&l).iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
     sk.break_link(&l)?;
     *doc.sketch_mut(id)? = sk;
     *s.doc_mut() = doc;

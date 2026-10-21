@@ -251,12 +251,12 @@ impl Sketch {
                             }
                         }
                         crate::ConstraintKind::PatternRadius { a, b } => {
-                            let r = match self.curve(a).map(|c| &c.kind) {
+                            let r = match self.curves.get(a).map(|c| &c.kind) {
                                 Some(CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. }) => Some(*r),
                                 _ => None,
                             };
                             if let (Some(r), Some(CurveKind::Circle { r: copy, .. } | CurveKind::Ellipse { r: copy, .. })) =
-                                (r, self.curves.get_mut(b.0).map(|c| &mut c.kind))
+                                (r, self.curves.get_mut(b).map(|c| &mut c.kind))
                             {
                                 *copy = r;
                             }
@@ -309,15 +309,15 @@ impl Sketch {
             let sources: Vec<_> = pattern.entities.iter().filter_map(|id| self.curve_index(id)).collect();
             for instance in &pattern.instances {
                 for (seed, copy) in sources.iter().zip(&instance.curves) {
-                    if let Some(CurveKind::Conic { rho, .. }) = self.curve(*seed).map(|c| &c.kind)
+                    if let Some(CurveKind::Conic { rho, .. }) = self.curves.get(*seed).map(|c| &c.kind)
                         && let Some(copy) = self.curve_index(copy)
                     {
                         let rho = *rho;
-                        if let Some(CurveKind::Conic { rho: slot, .. }) = self.curves.get_mut(copy.0).map(|c| &mut c.kind) {
+                        if let Some(CurveKind::Conic { rho: slot, .. }) = self.curves.get_mut(copy).map(|c| &mut c.kind) {
                             *slot = rho;
                         }
                     }
-                    let Some(source) = self.curve(*seed).cloned() else { continue };
+                    let Some(source) = self.curves.get(*seed).cloned() else { continue };
                     if let CurveKind::Arc { c, a, b } = source.kind {
                         let mapped = |p: PointIdx| {
                             self.points
@@ -326,7 +326,7 @@ impl Sketch {
                                 .and_then(|(_, id)| self.point_index(id))
                         };
                         if let (Some(c), Some(a), Some(b), Some(copy)) = (mapped(c), mapped(a), mapped(b), self.curve_index(copy))
-                            && let Some(curve) = self.curves.get_mut(copy.0)
+                            && let Some(curve) = self.curves.get_mut(copy)
                         {
                             curve.kind = CurveKind::Arc { c, a, b };
                             curve.reversed = source.reversed;
@@ -373,10 +373,9 @@ impl Sketch {
                         && finite(dir.y)
                         && (dir.len() - 1.0).abs() < 1e-6
                         && dir2.is_none_or(|d| finite(d.x) && finite(d.y) && (d.len() - 1.0).abs() < 1e-6)
-                        && direction
-                            .iter()
-                            .chain(direction2)
-                            .all(|id| self.curve_index(id).is_some_and(|l| matches!(self.curve(l).map(|c| &c.kind), Some(CurveKind::Line { .. }))))
+                        && direction.iter().chain(direction2).all(|id| {
+                            self.curve_index(id).is_some_and(|l| matches!(self.curves.get(l).map(|c| &c.kind), Some(CurveKind::Line { .. })))
+                        })
                 }
             };
             if !valid {

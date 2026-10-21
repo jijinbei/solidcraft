@@ -789,7 +789,7 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: CurveIdx, to: &Plane) -> 
     let map = |p: Vec2| to.to_local(from.to_world(p));
     let parallel = from.normal().cross(to.normal()).len() < 1e-9;
     let flip = from.normal().dot(to.normal()) < 0.0;
-    match sk.curve(ci).map(|c| &c.kind) {
+    match sk.curves.get(ci).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => match (sk.point(*a), sk.point(*b)) {
             (Some(a), Some(b)) => {
                 let (a, b) = (map(a), map(b));

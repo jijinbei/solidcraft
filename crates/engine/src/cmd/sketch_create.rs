@@ -290,7 +290,7 @@ fn text(s: &mut Session, p: &Value) -> Result<Value> {
 fn guide(sk: &mut Sketch, src: &LinkSource) -> Option<String> {
     let LinkSource::Text { style, .. } = src else { return None };
     let id = style.path.as_ref()?;
-    let curve = sk.curve_index(id).and_then(|c| sk.curve_mut(c))?;
+    let curve = sk.curve_index(id).and_then(|c| sk.curves.get_mut(c))?;
     if curve.construction {
         return None;
     }
@@ -303,7 +303,7 @@ fn guide(sk: &mut Sketch, src: &LinkSource) -> Option<String> {
 pub(super) fn text_link<'a>(sk: &'a Sketch, entity: &str) -> Option<&'a str> {
     let link = sk
         .curve_index(entity)
-        .and_then(|i| sk.curve(i))
+        .and_then(|i| sk.curves.get(i))
         .and_then(|c| c.link.as_deref())
         .or_else(|| sk.resolve_point(entity).and_then(|i| sk.points.get(i)).and_then(|p| p.link.as_deref()))?;
     sk.link(link).filter(|source| source.kind == LinkKind::Text).map(|source| source.id.as_str())
@@ -422,7 +422,7 @@ fn apply_text_edit(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value) -
 
 /// The curve ending at point `pi` and the direction leaving it there.
 fn end_of(sk: &Sketch, pi: PointIdx) -> Option<(CurveIdx, Vec2)> {
-    sk.curves.iter().enumerate().filter(|(_, c)| !c.construction).find_map(|(i, _)| leaving_dir(sk, CurveIdx(i), pi).map(|d| (CurveIdx(i), d)))
+    sk.curves.iter_enumerated().filter(|(_, c)| !c.construction).find_map(|(i, _)| leaving_dir(sk, i, pi).map(|d| (i, d)))
 }
 
 /// The continuity a blend asks for: the number of derivatives of each reference curve it
@@ -459,8 +459,8 @@ fn flip_odd(d: &mut [Vec2]) {
 /// exact piece, when a derivative is not finite (a corrupt or degenerate reference), or when it
 /// has no tangent at all: no blend can meet the last case.
 fn joint_derivatives(sk: &Sketch, ci: CurveIdx, pi: PointIdx, order: usize, leaving: bool, what: &str, cmd: &str) -> Result<Vec<Vec2>> {
-    let id = sk.curve(ci).map(|c| c.id.as_str()).unwrap_or("?");
-    let (start, end) = sk.curve(ci).and_then(|c| c.kind.ends()).ok_or_else(|| bad(cmd, format!("`{id}` has no end points")))?;
+    let id = sk.curves.get(ci).map(|c| c.id.as_str()).unwrap_or("?");
+    let (start, end) = sk.curves.get(ci).and_then(|c| c.kind.ends()).ok_or_else(|| bad(cmd, format!("`{id}` has no end points")))?;
     let at_end = end == pi;
     if !at_end && start != pi {
         return Err(bad(cmd, format!("`{what}` is not an end point of `{id}`")));
@@ -542,7 +542,7 @@ fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         for id in &ids {
             let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
-            let cu = sk.curve_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
+            let cu = sk.curves.get_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
             if !matches!(cu.kind, CurveKind::Line { .. }) {
                 return Err(bad(cmd, format!("`{id}` is not a line")));
             }
@@ -567,7 +567,7 @@ fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         for id in &ids {
             let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
-            let cu = sk.curve_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
+            let cu = sk.curves.get_mut(c).ok_or_else(|| bad(cmd, "curve"))?;
             if !matches!(cu.kind, CurveKind::Line { .. }) {
                 return Err(bad(cmd, format!("`{id}` is not a line")));
             }
@@ -718,7 +718,7 @@ fn midpoint_line(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Direction leaving curve `ci` at its end point `pi` (continuing the curve past that end).
 fn leaving_dir(sk: &Sketch, ci: CurveIdx, pi: PointIdx) -> Option<Vec2> {
-    match sk.curve(ci)?.kind {
+    match sk.curves.get(ci)?.kind {
         CurveKind::Line { a, b } => {
             let (pa, pb) = (sk.point(a)?, sk.point(b)?);
             if pi == b {
@@ -789,13 +789,7 @@ fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
             }
             None => candidates
                 .iter()
-                .find_map(|&q| {
-                    sk.curves
-                        .iter()
-                        .enumerate()
-                        .find(|(i, c)| !c.construction && leaving_dir(sk, CurveIdx(*i), q).is_some())
-                        .map(|(i, _)| (CurveIdx(i), q))
-                })
+                .find_map(|&q| sk.curves.iter_enumerated().find(|(i, c)| !c.construction && leaving_dir(sk, *i, q).is_some()).map(|(i, _)| (i, q)))
                 .ok_or_else(|| bad(cmd, "no line or arc ends at `start`"))?,
         };
         let t = leaving_dir(sk, ci, pi).ok_or_else(|| bad(cmd, "`start` is not an end of that curve"))?;
@@ -811,7 +805,7 @@ fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
             sk.add_arc(center, s0, end, [None, Some(pi), None], None)?
         } else {
             let a = sk.add_arc(center, end, s0, [None, None, Some(pi)], None)?;
-            if let Some(c) = sk.curve_mut(a) {
+            if let Some(c) = sk.curves.get_mut(a) {
                 c.reversed = true;
             }
             a
@@ -956,7 +950,7 @@ fn arc_slot(s: &mut Session, p: &Value, cmd: &str, o: Vec2, r: f64, t0: f64, swe
         let cap_e = sk.add_arc(at(t1, r), at(t1, r + h), at(t1, r - h), [Some(pe), Some(oe), Some(ie)], None)?;
         let cap_s = sk.add_arc(at(t0, r), at(t0, r - h), at(t0, r + h), [Some(ps), Some(is), Some(os)], None)?;
         let centre = sk.add_arc(o, at(t0, r), at(t1, r), [Some(oc), Some(ps), Some(pe)], None)?;
-        if let Some(c) = sk.curve_mut(centre) {
+        if let Some(c) = sk.curves.get_mut(centre) {
             c.construction = true;
             centre_arc = Some(c.id.clone());
         }

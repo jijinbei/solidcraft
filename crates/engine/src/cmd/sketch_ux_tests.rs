@@ -595,7 +595,7 @@ fn dragging_circles_and_arcs() {
 fn dragging_a_conic_reads_rho_off_the_cursor_and_its_apex_slides_like_any_point() {
     let mut s = new_sketch();
     run(&mut s, "sketch.conic", json!({"start": [0, 0], "end": [40, 0], "apex": [20, 20]}));
-    let rho = |s: &Session| match sketch(s).curves[0].kind {
+    let rho = |s: &Session| match sketch(s).curves[CurveIdx(0)].kind {
         solidcraft_sketch::CurveKind::Conic { rho, .. } => rho,
         ref k => panic!("not a conic: {k:?}"),
     };

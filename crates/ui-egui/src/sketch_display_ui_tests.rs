@@ -258,8 +258,7 @@ fn pixel_annulus_fill_keeps_hole_and_cpu_bridge_matches_cached_boundaries() {
     let cpu = solidcraft_engine::view::sketch_lines_with_sampler(&ss.sketch, &ss.plane, true, &[], |sk, index, plane| {
         crate::sketch_display::curve_parts(sk, index, plane, &proj, ppp)
     });
-    let cached: Vec<_> =
-        (0..ss.sketch.curves.len()).map(CurveIdx).flat_map(|index| curve_sample(&h.app, sid, index, &ss.plane, &proj).parts.clone()).collect();
+    let cached: Vec<_> = ss.sketch.curves.indices().flat_map(|index| curve_sample(&h.app, sid, index, &ss.plane, &proj).parts.clone()).collect();
     assert_eq!(
         cpu.iter().map(|(points, _, _)| points.clone()).collect::<Vec<_>>(),
         cached,

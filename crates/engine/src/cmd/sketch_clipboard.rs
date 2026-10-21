@@ -85,7 +85,7 @@ fn chosen(s: &Session, p: &Value) -> Vec<String> {
 }
 
 fn text_of(sk: &Sketch, ci: CurveIdx) -> Option<&str> {
-    let link = sk.curve(ci)?.link.as_deref()?;
+    let link = sk.curves.get(ci)?.link.as_deref()?;
     sk.link(link).filter(|l| l.kind == LinkKind::Text).map(|l| l.id.as_str())
 }
 
@@ -128,7 +128,7 @@ fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let mut cmap: BTreeMap<CurveIdx, CurveIdx> = BTreeMap::new();
     for &c in &cs {
-        let Some(cu) = sk.curve(c) else { continue };
+        let Some(cu) = sk.curves.get(c) else { continue };
         let mut kind = cu.kind.clone();
         let used: Vec<(PointIdx, PointIdx)> = kind.point_ids().into_iter().map(|q| (q, take(q, &mut clip, &mut pmap))).collect();
         kind.map_points(&|q| used.iter().find(|(o, _)| *o == q).map_or(q, |(_, n)| *n));
@@ -274,7 +274,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             let mut kind = c.kind.clone();
             kind.map_points(&|q| pts.get(q.0).copied().unwrap_or(PointIdx(usize::MAX)));
             let i = sk.add_curve(kind, None)?;
-            if let Some(cu) = sk.curve_mut(i) {
+            if let Some(cu) = sk.curves.get_mut(i) {
                 cu.construction = c.construction;
                 cu.centerline = c.centerline;
                 cu.reversed = c.reversed;
@@ -297,18 +297,18 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             }
             cons.push(id);
         }
-        let mut curve_ids: Vec<String> = made.iter().filter_map(|i| sk.curve(*i).map(|c| c.id.clone())).collect();
+        let mut curve_ids: Vec<String> = made.iter().filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone())).collect();
         for (src, path) in &clip.texts {
             let mut src = src.clone();
             let LinkSource::Text { at, style, exprs, .. } = &mut src else { continue };
-            style.path = path.and_then(|k| made.get(k.0)).and_then(|i| sk.curve(*i)).map(|c| c.id.clone());
+            style.path = path.and_then(|k| made.get(k.0)).and_then(|i| sk.curves.get(*i)).map(|c| c.id.clone());
             *at += t;
             // The copy sits where it was pasted: its place no longer follows the original's expressions.
             exprs.x = None;
             exprs.y = None;
             let geom = sk.text_source_geometry(&src)?;
             let link = sk.add_link(LinkKind::Text, src, &geom)?;
-            curve_ids.extend(sk.link_curves(&link).into_iter().filter_map(|i| sk.curve(i).map(|c| c.id.clone())));
+            curve_ids.extend(sk.link_curves(&link).into_iter().filter_map(|i| sk.curves.get(i).map(|c| c.id.clone())));
         }
         let lone: Vec<String> = clip.lone.iter().filter_map(|n| pts.get(n.0)).filter_map(|i| sk.points.get(*i).map(|q| q.id.clone())).collect();
         Ok((curve_ids, lone, cons))

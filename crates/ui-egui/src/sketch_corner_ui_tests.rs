@@ -43,7 +43,7 @@ fn clicked_periodic_fit_closes_at_start_and_right_click_keeps_natural() {
     h.step(&json!({"click":{"world":[2,2,0]}})).unwrap();
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
-    assert!(matches!(sk.curves[0].kind, CurveKind::Spline { periodic: true, .. }));
+    assert!(matches!(sk.curves[CurveIdx(0)].kind, CurveKind::Spline { periodic: true, .. }));
     sk.validate_periodic_splines().unwrap();
     assert_eq!(solidcraft_engine::sketch::find_profiles(&sk).len(), 1);
     assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
@@ -53,7 +53,7 @@ fn clicked_periodic_fit_closes_at_start_and_right_click_keeps_natural() {
     h.step(&json!({"click":{"world":[20,6,0]},"button":"right"})).unwrap();
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     assert_eq!(sk.curves.len(), 2);
-    assert!(matches!(sk.curves[1].kind, CurveKind::Spline { periodic: false, .. }));
+    assert!(matches!(sk.curves[CurveIdx(1)].kind, CurveKind::Spline { periodic: false, .. }));
 }
 
 /// Curve ids in the open dialog's first selection input.

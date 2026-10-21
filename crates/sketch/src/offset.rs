@@ -70,7 +70,7 @@ impl Sketch {
     /// deletion releases the surviving outputs, while retained dependents keep
     /// their source references so the command's refresh refuses broken sources.
     pub(crate) fn prune_offsets_for_removed_curves(&mut self, which: &[CurveIdx]) {
-        let removed = which.iter().filter_map(|i| self.curve(*i).map(|curve| curve.id.clone())).collect::<std::collections::BTreeSet<_>>();
+        let removed = which.iter().filter_map(|i| self.curves.get(*i).map(|curve| curve.id.clone())).collect::<std::collections::BTreeSet<_>>();
         if removed.is_empty() {
             return;
         }
@@ -145,7 +145,7 @@ impl Sketch {
             let mut pieces = Vec::new();
             for (id, forward) in &offset.sources {
                 let i = self.curve_index(id).ok_or_else(bad)?;
-                let kind = &self.curve(i).ok_or_else(bad)?.kind;
+                let kind = &self.curves.get(i).ok_or_else(bad)?.kind;
                 let piece = match *kind {
                     CurveKind::Line { a, b } => {
                         let (a, b) = (self.point(a).ok_or_else(bad)?, self.point(b).ok_or_else(bad)?);
@@ -171,7 +171,7 @@ impl Sketch {
                             return Err(SketchError::Invalid("the offset collapses a circle".into()));
                         }
                         let out = offset.outputs.first().and_then(|id| self.curve_index(id)).ok_or_else(bad)?;
-                        if let Some(crate::Curve { kind: CurveKind::Circle { r: target, .. }, .. }) = self.curve_mut(out) {
+                        if let Some(crate::Curve { kind: CurveKind::Circle { r: target, .. }, .. }) = self.curves.get_mut(out) {
                             *target = r;
                         } else {
                             return Err(bad());
@@ -215,7 +215,7 @@ impl Sketch {
                     return Err(SketchError::Invalid("the offset curves would cross".into()));
                 }
                 let ci = self.curve_index(id).ok_or_else(bad)?;
-                let kind = self.curve(ci).ok_or_else(bad)?.kind.clone();
+                let kind = self.curves.get(ci).ok_or_else(bad)?.kind.clone();
                 let (pa, pb) = match kind {
                     CurveKind::Line { a, b } => (a, b),
                     CurveKind::Arc { a, b, .. } => {

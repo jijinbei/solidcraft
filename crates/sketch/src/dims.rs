@@ -40,7 +40,7 @@ pub struct DimLayout {
 }
 
 fn line_ends(sk: &Sketch, l: CurveIdx) -> Option<(Vec2, Vec2)> {
-    match sk.curve(l)?.kind {
+    match sk.curves.get(l)?.kind {
         CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
         _ => None,
     }
@@ -105,7 +105,7 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             DimFrame::Linear { p0, p1, dir: unit(p1 - p0, normal) }
         }
         Radius { c, .. } | Diameter { c, .. } => {
-            let (radius, arc) = match sk.curve(c)?.kind {
+            let (radius, arc) = match sk.curves.get(c)?.kind {
                 CurveKind::Ellipse { r, .. } => (r, None),
                 CurveKind::Arc { .. } => match sk.segs(c).first()? {
                     solidcraft_geom::Seg2::Arc { radius, start, sweep, .. } => (*radius, Some((*start, *sweep))),
@@ -224,9 +224,9 @@ pub fn dim_reach(sk: &Sketch, k: &ConstraintKind) -> [Option<(Vec2, Vec2)>; 2] {
     let Some((a, b)) = line_ends(sk, l) else { return [None, None] };
     let d = b - a;
     // A line ending at `p` that runs parallel to `l`.
-    let parallel = sk.curves.iter().enumerate().find_map(|(i, c)| match c.kind {
-        CurveKind::Line { a: pa, b: pb } if CurveIdx(i) != l && (pa == p || pb == p) => {
-            let (u, v) = line_ends(sk, CurveIdx(i))?;
+    let parallel = sk.curves.iter_enumerated().find_map(|(i, c)| match c.kind {
+        CurveKind::Line { a: pa, b: pb } if i != l && (pa == p || pb == p) => {
+            let (u, v) = line_ends(sk, i)?;
             let e = v - u;
             (e.len() > 1e-12 && d.cross(e).abs() <= 1e-9 * d.len() * e.len()).then_some((u, v))
         }

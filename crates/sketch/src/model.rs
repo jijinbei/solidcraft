@@ -79,16 +79,12 @@ impl Idx for PointIdx {
     }
 }
 
-impl std::ops::Index<CurveIdx> for Vec<Curve> {
-    type Output = Curve;
-    fn index(&self, i: CurveIdx) -> &Curve {
-        &self[i.0]
+impl Idx for CurveIdx {
+    fn new(i: usize) -> Self {
+        CurveIdx(i)
     }
-}
-
-impl std::ops::IndexMut<CurveIdx> for Vec<Curve> {
-    fn index_mut(&mut self, i: CurveIdx) -> &mut Curve {
-        &mut self[i.0]
+    fn index(self) -> usize {
+        self.0
     }
 }
 
@@ -673,7 +669,7 @@ pub struct SketchView {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
     pub points: IndexVec<PointIdx, SPoint>,
-    pub curves: Vec<Curve>,
+    pub curves: IndexVec<CurveIdx, Curve>,
     pub constraints: Vec<Constraint>,
     /// Editable sketch patterns; their relations are ordinary solver constraints.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -711,7 +707,7 @@ impl Sketch {
     pub fn new() -> Self {
         Sketch {
             points: vec![SPoint { id: "origin".into(), pos: Vec2::ZERO, fixed: true, link: None, exprs: None }].into(),
-            curves: Vec::new(),
+            curves: IndexVec::new(),
             constraints: Vec::new(),
             patterns: Vec::new(),
             links: Vec::new(),
@@ -790,12 +786,6 @@ impl Sketch {
     pub fn point(&self, p: PointIdx) -> Option<Vec2> {
         self.points.get(p).map(|p| p.pos)
     }
-    pub fn curve(&self, c: CurveIdx) -> Option<&Curve> {
-        self.curves.get(c.0)
-    }
-    pub fn curve_mut(&mut self, c: CurveIdx) -> Option<&mut Curve> {
-        self.curves.get_mut(c.0)
-    }
 
     fn check_pos(p: Vec2) -> Result<Vec2> {
         if in_range(p) { Ok(p) } else { Err(SketchError::Invalid(format!("point {:?}", [p.x, p.y]))) }
@@ -840,7 +830,7 @@ impl Sketch {
             return Err(SketchError::Invalid("line needs two distinct points".into()));
         }
         let id = self.curve_id(id, "l")?;
-        self.curves.push(Curve {
+        Ok(self.curves.push(Curve {
             id,
             kind: CurveKind::Line { a, b },
             construction: false,
@@ -849,8 +839,7 @@ impl Sketch {
             centerline: false,
             fixed: false,
             infinite: false,
-        });
-        Ok(CurveIdx(self.curves.len() - 1))
+        }))
     }
 
     /// Line from `p0` to `p1`, reusing given point indices when provided.
@@ -878,7 +867,7 @@ impl Sketch {
             Some(i) if i.0 < self.points.len() => i,
             _ => self.own_point(&id, "center", center)?,
         };
-        self.curves.push(Curve {
+        Ok(self.curves.push(Curve {
             id,
             kind: CurveKind::Circle { c, r },
             construction: false,
@@ -887,8 +876,7 @@ impl Sketch {
             centerline: false,
             fixed: false,
             infinite: false,
-        });
-        Ok(CurveIdx(self.curves.len() - 1))
+        }))
     }
 
     /// Counter-clockwise arc around `center` from `p0` to `p1` (the end point is projected onto
@@ -913,7 +901,7 @@ impl Sketch {
             Some(i) if i.0 < n && i != a => i,
             _ => self.own_point(&id, "end", p1)?,
         };
-        self.curves.push(Curve {
+        Ok(self.curves.push(Curve {
             id,
             kind: CurveKind::Arc { c, a, b },
             construction: false,
@@ -922,8 +910,7 @@ impl Sketch {
             centerline: false,
             fixed: false,
             infinite: false,
-        });
-        Ok(CurveIdx(self.curves.len() - 1))
+        }))
     }
 
     pub fn add_constraint(&mut self, kind: ConstraintKind, param: Option<String>) -> Result<String> {
@@ -950,9 +937,9 @@ impl Sketch {
                 return Err(SketchError::Unknown(format!("curve #{c}")));
             }
         }
-        let is_line = |i: CurveIdx| matches!(self.curve(i).map(|c| &c.kind), Some(CurveKind::Line { .. }));
-        let is_round = |i: CurveIdx| matches!(self.curve(i).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
-        let name = |i: CurveIdx| self.curve(i).map(|c| c.id.clone()).unwrap_or_default();
+        let is_line = |i: CurveIdx| matches!(self.curves.get(i).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+        let is_round = |i: CurveIdx| matches!(self.curves.get(i).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+        let name = |i: CurveIdx| self.curves.get(i).map(|c| c.id.clone()).unwrap_or_default();
         let need_line = |i: CurveIdx| if is_line(i) { Ok(()) } else { Err(SketchError::WrongKind(name(i), "needs a line".into())) };
         let need_round = |i: CurveIdx| if is_round(i) { Ok(()) } else { Err(SketchError::WrongKind(name(i), "needs a circle or arc".into())) };
         match *k {
@@ -976,7 +963,7 @@ impl Sketch {
             }
             PatternRadius { a, b } => {
                 let independent_radius =
-                    |c: CurveIdx| matches!(self.curve(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. }));
+                    |c: CurveIdx| matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. }));
                 if a == b || !independent_radius(a) || !independent_radius(b) {
                     return Err(SketchError::Invalid("pattern radius needs two circles or ellipses".into()));
                 }
@@ -989,11 +976,11 @@ impl Sketch {
             | Symmetric { l, .. }
             | PointLineDistance { l, .. }
             | LinearDiameter { l, .. } => need_line(l)?,
-            ArcLength { c, .. } | ArcSweep { c, .. } if !matches!(self.curve(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) => {
+            ArcLength { c, .. } | ArcSweep { c, .. } if !matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Arc { .. })) => {
                 return Err(SketchError::WrongKind(name(c), "arc length needs an arc".into()));
             }
             Smooth { a, b } => {
-                let ends = |i: CurveIdx| self.curve(i).and_then(|c| c.kind.ends());
+                let ends = |i: CurveIdx| self.curves.get(i).and_then(|c| c.kind.ends());
                 let shared = match (ends(a), ends(b)) {
                     (Some((a0, a1)), Some((b0, b1))) => a0 == b0 || a0 == b1 || a1 == b0 || a1 == b1,
                     _ => false,
@@ -1007,14 +994,14 @@ impl Sketch {
                 need_line(b)?;
             }
             // On an ellipse, a radius dimension holds its minor radius.
-            Radius { c, .. } if matches!(self.curve(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {}
+            Radius { c, .. } if matches!(self.curves.get(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {}
             Radius { c, .. } | Diameter { c, .. } => need_round(c)?,
             Concentric { a, b } => {
                 need_round(a)?;
                 need_round(b)?;
             }
             SlotOverallLength { a, b, value } => {
-                if a == b || ![a, b].iter().all(|i| matches!(self.curve(*i).map(|c| &c.kind), Some(CurveKind::Arc { .. }))) {
+                if a == b || ![a, b].iter().all(|i| matches!(self.curves.get(*i).map(|c| &c.kind), Some(CurveKind::Arc { .. }))) {
                     return Err(SketchError::Invalid("overall slot length needs two different arc caps".into()));
                 }
                 let radius = |cap: CurveIdx| {
@@ -1048,7 +1035,7 @@ impl Sketch {
                 need_round(c)?;
             }
             Tangent { a, b } => {
-                let free = |i: CurveIdx| self.curve(i).is_some_and(|c| c.kind.is_freeform());
+                let free = |i: CurveIdx| self.curves.get(i).is_some_and(|c| c.kind.is_freeform());
                 if !(is_round(a) || is_round(b) || free(a) || free(b)) {
                     return Err(SketchError::WrongKind(name(a), "tangent needs a circle or arc".into()));
                 }
@@ -1232,7 +1219,7 @@ impl Sketch {
             if p == PointIdx::ORIGIN || used.get(p.0).copied() != Some(false) || !self.point(p).is_some_and(|p| p.is_finite()) {
                 continue;
             }
-            let Some(curve) = self.curve(c) else { continue };
+            let Some(curve) = self.curves.get(c) else { continue };
             if !matches!(curve.kind, CurveKind::Line { .. } | CurveKind::Arc { .. })
                 || curve.kind.point_ids().iter().any(|i| !self.point(*i).is_some_and(|p| p.is_finite()))
             {
@@ -1252,11 +1239,11 @@ impl Sketch {
             let Some(p) = self.point(i) else { continue };
             let mut ext = Vec::new();
             for c in on {
-                let Some((a, b)) = self.curve(c).and_then(|c| c.kind.ends()) else { continue };
+                let Some((a, b)) = self.curves.get(c).and_then(|c| c.kind.ends()) else { continue };
                 let (Some(pa), Some(pb)) = (self.point(a), self.point(b)) else { continue };
                 let near = if p.dist(pa) <= p.dist(pb) { pa } else { pb };
                 // A line only needs one when the corner is beyond its ends.
-                let inside = matches!(self.curve(c).map(|c| &c.kind), Some(CurveKind::Line { .. })) && {
+                let inside = matches!(self.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. })) && {
                     let d = pb - pa;
                     let t = (p - pa).dot(d) / d.dot(d).max(1e-300);
                     (0.0..=1.0).contains(&t)
@@ -1273,7 +1260,7 @@ impl Sketch {
     /// Every point a constraint touches: its points and the points of its curves.
     pub fn constraint_points(&self, k: &ConstraintKind) -> Vec<PointIdx> {
         let (mut pts, curves) = k.indices();
-        pts.extend(curves.into_iter().flat_map(|c| self.curve(c).map(|x| x.kind.point_ids()).unwrap_or_default()));
+        pts.extend(curves.into_iter().flat_map(|c| self.curves.get(c).map(|x| x.kind.point_ids()).unwrap_or_default()));
         pts
     }
 
@@ -1302,12 +1289,12 @@ impl Sketch {
                 None => !locked.get(v).copied().unwrap_or(true),
                 Some(c) => self
                     .curves
-                    .get(c)
+                    .get(CurveIdx(c))
                     .is_some_and(|x| matches!(x.kind, CurveKind::Circle { .. } | CurveKind::Ellipse { .. }) && x.link.is_none() && !x.fixed),
             }
         };
         let curve_nodes = |c: CurveIdx| {
-            let mut v: Vec<usize> = self.curve(c).map(|x| x.kind.point_ids()).unwrap_or_default().into_iter().map(|p| p.0).collect();
+            let mut v: Vec<usize> = self.curves.get(c).map(|x| x.kind.point_ids()).unwrap_or_default().into_iter().map(|p| p.0).collect();
             v.push(n + c.0);
             v
         };
@@ -1344,19 +1331,19 @@ impl Sketch {
 
     /// Is curve `c` held in place: fixed or projected (linked).
     pub fn curve_locked(&self, c: CurveIdx) -> bool {
-        self.curve(c).is_some_and(|c| c.fixed || c.link.is_some() || self.freeform_offsets.iter().any(|offset| offset.output == c.id))
+        self.curves.get(c).is_some_and(|c| c.fixed || c.link.is_some() || self.freeform_offsets.iter().any(|offset| offset.output == c.id))
     }
 
     /// Radius of a circle or arc.
     pub fn radius(&self, ci: CurveIdx) -> Option<f64> {
-        match self.curve(ci)?.kind {
+        match self.curves.get(ci)?.kind {
             CurveKind::Circle { r, .. } => Some(r),
             CurveKind::Arc { c, a, .. } => Some(self.point(c)?.dist(self.point(a)?)),
             _ => None,
         }
     }
     pub fn center(&self, ci: CurveIdx) -> Option<Vec2> {
-        match self.curve(ci)?.kind {
+        match self.curves.get(ci)?.kind {
             CurveKind::Circle { c, .. } | CurveKind::Arc { c, .. } | CurveKind::Ellipse { c, .. } => self.point(c),
             _ => None,
         }
@@ -1364,7 +1351,7 @@ impl Sketch {
 
     /// Boundary segments of a curve (a circle gives two half arcs).
     pub fn segs(&self, ci: CurveIdx) -> Vec<Seg2> {
-        let Some(cu) = self.curve(ci) else { return Vec::new() };
+        let Some(cu) = self.curves.get(ci) else { return Vec::new() };
         if cu.kind.is_freeform() {
             let poly = self.polyline(ci);
             return poly.windows(2).filter(|w| w[0].dist(w[1]) > 1e-12).map(|w| Seg2::Line { a: w[0], b: w[1] }).collect();
@@ -1397,7 +1384,7 @@ impl Sketch {
     /// splines and control splines up to `MAX_BEZIER_DEGREE` as Béziers. None for other curves
     /// (and for higher-degree splines, which stay polylines).
     pub fn exact_segs(&self, ci: CurveIdx) -> Option<Vec<Seg2>> {
-        let cu = self.curve(ci)?;
+        let cu = self.curves.get(ci)?;
         let pt = |i: &PointIdx| self.point(*i);
         match &cu.kind {
             CurveKind::Ellipse { c, m, r } => {
@@ -1445,7 +1432,7 @@ impl Sketch {
     /// Polyline of a free-form curve (ellipse, spline, conic); other curves: their segments'
     /// polylines.
     pub fn polyline(&self, ci: CurveIdx) -> Vec<Vec2> {
-        let Some(cu) = self.curve(ci) else { return Vec::new() };
+        let Some(cu) = self.curves.get(ci) else { return Vec::new() };
         let pt = |i: &PointIdx| self.point(*i);
         match &cu.kind {
             CurveKind::Ellipse { c, m, r } => match (pt(c), pt(m)) {
@@ -1517,16 +1504,15 @@ impl Sketch {
             }
         };
         let id = self.curve_id(id, prefix)?;
-        self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None, centerline: false, fixed: false, infinite: false });
-        Ok(CurveIdx(self.curves.len() - 1))
+        Ok(self.curves.push(Curve { id, kind, construction: false, reversed: false, link: None, centerline: false, fixed: false, infinite: false }))
     }
 
     /// Remove curves (by index) and then any points no longer used by a curve (except the
     /// origin and free points), and constraints that referred to removed entities.
     pub fn remove_curves(&mut self, which: &[CurveIdx]) {
         let mut owned: Vec<PointIdx> = Vec::new();
-        for (i, c) in self.curves.iter().enumerate() {
-            if which.contains(&CurveIdx(i)) {
+        for (i, c) in self.curves.iter_enumerated() {
+            if which.contains(&i) {
                 owned.extend(c.kind.point_ids());
             }
         }
@@ -1546,21 +1532,17 @@ impl Sketch {
     /// Remove curves only (points stay), remapping constraints.
     fn drop_curves(&mut self, which: &[CurveIdx]) {
         self.prune_offsets_for_removed_curves(which);
-        let mut cmap = vec![None; self.curves.len()];
+        let mut cmap: IndexVec<CurveIdx, Option<CurveIdx>> = vec![None; self.curves.len()].into();
         let mut n = 0;
-        for (i, slot) in cmap.iter_mut().enumerate() {
-            if !which.contains(&CurveIdx(i)) {
+        for (i, slot) in cmap.iter_enumerated_mut() {
+            if !which.contains(&i) {
                 *slot = Some(CurveIdx(n));
                 n += 1;
             }
         }
-        let mut idx = 0;
-        self.curves.retain(|_| {
-            let k = !which.contains(&CurveIdx(idx));
-            idx += 1;
-            k
-        });
-        let cm = |i: CurveIdx| cmap.get(i.0).copied().flatten();
+        let mut kept = cmap.iter().map(Option::is_some);
+        self.curves.retain(|_| kept.next().unwrap_or(false));
+        let cm = |i: CurveIdx| cmap.get(i).copied().flatten();
         let pm = |i: PointIdx| Some(i);
         self.constraints.retain_mut(|c| c.kind.remap(&pm, &cm));
     }
@@ -1572,10 +1554,10 @@ impl Sketch {
         }
         let gone = |p: PointIdx| p != PointIdx::ORIGIN && which.contains(&p);
         let dead_curves: Vec<CurveIdx> =
-            self.curves.iter().enumerate().filter(|(_, c)| c.kind.point_ids().into_iter().any(gone)).map(|(i, _)| CurveIdx(i)).collect();
+            self.curves.iter_enumerated().filter(|(_, c)| c.kind.point_ids().into_iter().any(gone)).map(|(i, _)| i).collect();
         let private = dead_curves
             .iter()
-            .filter_map(|i| self.curve(*i))
+            .filter_map(|i| self.curves.get(*i))
             .filter(|c| self.freeform_offsets.iter().any(|r| r.output == c.id))
             .flat_map(|c| c.kind.point_ids())
             .collect::<std::collections::BTreeSet<_>>();
@@ -1627,7 +1609,7 @@ impl Sketch {
             return Some(i);
         }
         let (cid, role) = r.rsplit_once('.')?;
-        let c = self.curve(self.curve_index(cid)?)?;
+        let c = self.curves.get(self.curve_index(cid)?)?;
         let role = match (role, c.reversed) {
             ("start", true) => "end",
             ("end", true) => "start",
@@ -1645,7 +1627,7 @@ impl Sketch {
 
     /// Axis-aligned bounds of all geometry (for views).
     pub fn bounds(&self) -> Option<(Vec2, Vec2)> {
-        let b: Aabb2 = (0..self.curves.len()).flat_map(|i| self.segs(CurveIdx(i))).flat_map(|s| s.polyline(0.5)).collect();
+        let b: Aabb2 = self.curves.indices().flat_map(|i| self.segs(i)).flat_map(|s| s.polyline(0.5)).collect();
         (!b.is_empty()).then_some((b.min, b.max))
     }
 }

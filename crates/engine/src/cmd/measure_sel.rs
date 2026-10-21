@@ -156,7 +156,7 @@ fn sketch_of<'a>(
 fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
     use solidcraft_sketch::CurveKind;
     let sk = &ss.sketch;
-    let c = sk.curve(sk.curve_index(id)?)?;
+    let c = sk.curves.get(sk.curve_index(id)?)?;
     let at = |i: PointIdx| sk.point(i).map(|p| ss.plane.to_world(p));
     let normal = ss.plane.normal().unit()?;
     let (shape, pts) = match c.kind {

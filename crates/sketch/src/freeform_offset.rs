@@ -455,7 +455,7 @@ impl Sketch {
         if self.freeform_offsets.len() >= MAX_ASSOCIATIONS {
             return Err(bad("too many associative free-form offsets"));
         }
-        let source_id = self.curve(source).ok_or_else(|| bad("missing offset source"))?.id.clone();
+        let source_id = self.curves.get(source).ok_or_else(|| bad("missing offset source"))?.id.clone();
         let source_pieces = self.exact_segs(source).ok_or_else(|| bad("offset source changed shape"))?.len();
         let mut result = None;
         let mut failure = None;
@@ -600,10 +600,9 @@ impl Sketch {
         let outputs: std::collections::BTreeSet<&str> = self.freeform_offsets.iter().map(|o| o.output.as_str()).collect();
         let nodes: std::collections::BTreeSet<PointIdx> =
             self.curves.iter().filter(|c| outputs.contains(c.id.as_str())).flat_map(|c| c.kind.point_ids()).collect();
-        let taken: Vec<(usize, PointIdx)> = self
+        let taken: Vec<(CurveIdx, PointIdx)> = self
             .curves
-            .iter()
-            .enumerate()
+            .iter_enumerated()
             .filter(|(_, c)| !outputs.contains(c.id.as_str()))
             .flat_map(|(ci, c)| c.kind.point_ids().into_iter().filter(|p| nodes.contains(p)).map(move |p| (ci, p)))
             .collect();

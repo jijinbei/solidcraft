@@ -323,9 +323,8 @@ fn a_line_end_on_a_circle_within_the_axis_snap_lands_on_the_quadrant_the_preview
         let sk = &st.sketch(sid).unwrap().sketch;
         let (line, a, b) = sk
             .curves
-            .iter()
-            .enumerate()
-            .find_map(|(i, c)| if let CurveKind::Line { a, b } = c.kind { Some((CurveIdx(i), a, b)) } else { None })
+            .iter_enumerated()
+            .find_map(|(i, c)| if let CurveKind::Line { a, b } = c.kind { Some((i, a, b)) } else { None })
             .unwrap_or_else(|| panic!("{deg}: no line, {:?}", h.app.status));
         assert!(sk.point(a).unwrap().dist(Vec2::ZERO) < 1e-9, "{deg}");
         assert!(sk.point(b).unwrap().dist(end) < 1e-9, "{deg}: placed at {:?}", sk.point(b));

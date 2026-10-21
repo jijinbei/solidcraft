@@ -53,10 +53,10 @@ impl<I: Idx, T> IndexVec<I, T> {
         self.items.iter_mut()
     }
     /// Every index, in order.
-    pub fn indices(&self) -> impl DoubleEndedIterator<Item = I> + ExactSizeIterator + use<I, T> {
+    pub fn indices(&self) -> impl DoubleEndedIterator<Item = I> + ExactSizeIterator + Clone + use<I, T> {
         (0..self.items.len()).map(I::new)
     }
-    pub fn iter_enumerated(&self) -> impl DoubleEndedIterator<Item = (I, &T)> + ExactSizeIterator {
+    pub fn iter_enumerated(&self) -> impl DoubleEndedIterator<Item = (I, &T)> + ExactSizeIterator + Clone {
         self.items.iter().enumerate().map(|(i, t)| (I::new(i), t))
     }
     pub fn iter_enumerated_mut(&mut self) -> impl DoubleEndedIterator<Item = (I, &mut T)> + ExactSizeIterator {
@@ -64,6 +64,9 @@ impl<I: Idx, T> IndexVec<I, T> {
     }
     pub fn first(&self) -> Option<&T> {
         self.items.first()
+    }
+    pub fn first_mut(&mut self) -> Option<&mut T> {
+        self.items.first_mut()
     }
     pub fn last(&self) -> Option<&T> {
         self.items.last()

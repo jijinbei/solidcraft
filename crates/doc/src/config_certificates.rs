@@ -2,7 +2,6 @@
 use crate::{DocError, Document, FeatureKind, ModelBody, Result, SolvedSketch};
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Seg2;
-use solidcraft_sketch::CurveIdx;
 
 fn valid_signature(outer: &[String], holes: &[Vec<String>]) -> bool {
     let valid = |ids: &[String]| {
@@ -403,7 +402,7 @@ impl<'a> ExactSketchCurves<'a> {
         if sketch.sketch.curves.len() > 2000 {
             return Self { segments };
         }
-        for (index, curve) in sketch.sketch.curves.iter().enumerate() {
+        for (index, curve) in sketch.sketch.curves.iter_enumerated() {
             if curve.construction
                 || !matches!(
                     curve.kind,
@@ -421,7 +420,7 @@ impl<'a> ExactSketchCurves<'a> {
                     .map(|center| vec![Seg2::Arc { center, radius: r, start: 0., sweep: std::f64::consts::TAU }])
                     .unwrap_or_default()
             } else {
-                sketch.sketch.segs(CurveIdx(index))
+                sketch.sketch.segs(index)
             };
             segments.push((curve.id.as_str(), curve.link.is_some(), originals));
         }
@@ -966,8 +965,8 @@ mod tests {
             .iter()
             .map(|generated| {
                 let mut found = None;
-                for (index, curve) in sketch.sketch.curves.iter().enumerate() {
-                    if sketch.sketch.segs(CurveIdx(index)).iter().any(|original| exact_segment_contains(original, generated)) {
+                for (index, curve) in sketch.sketch.curves.iter_enumerated() {
+                    if sketch.sketch.segs(index).iter().any(|original| exact_segment_contains(original, generated)) {
                         if found.is_some() {
                             return None;
                         }

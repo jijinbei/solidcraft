@@ -603,7 +603,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
 fn first_point(sk: &solidcraft_engine::sketch::Sketch, k: &ConstraintKind) -> Option<PointIdx> {
     use ConstraintKind::*;
     match *k {
-        Length { l, .. } => sk.curve(l).and_then(|c| c.kind.point_ids().first().copied()),
+        Length { l, .. } => sk.curves.get(l).and_then(|c| c.kind.point_ids().first().copied()),
         Distance { p, .. } | DistanceX { p, .. } | DistanceY { p, .. } | PointLineDistance { p, .. } | LinearDiameter { p, .. } => Some(p),
         _ => None,
     }

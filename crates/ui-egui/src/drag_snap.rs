@@ -94,7 +94,7 @@ pub fn find(sk: &Sketch, moving: &[(PointIdx, Vec2)], exclude: &[PointIdx], mm_p
     let targets: Vec<(PointIdx, Vec2)> =
         sk.points.iter_enumerated().filter(|(i, p)| !exclude.contains(i) && visible.takes(p)).map(|(i, p)| (i, p.pos)).collect();
     let free_curves: Vec<CurveIdx> =
-        (0..sk.curves.len()).map(CurveIdx).filter(|&c| sk.curve(c).is_some_and(|cu| !exclude.iter().any(|&p| cu.kind.uses(p)))).collect();
+        sk.curves.indices().filter(|&c| sk.curves.get(c).is_some_and(|cu| !exclude.iter().any(|&p| cu.kind.uses(p)))).collect();
     let mut best: Option<(f64, Snap)> = None;
     let offer = |best: &mut Option<(f64, Snap)>, d: f64, s: Snap| {
         if best.as_ref().is_none_or(|b| d < b.0) {
@@ -113,7 +113,7 @@ pub fn find(sk: &Sketch, moving: &[(PointIdx, Vec2)], exclude: &[PointIdx], mm_p
     if best.is_none() {
         for &(mi, p) in moving {
             for &c in &free_curves {
-                let Some(cu) = sk.curve(c) else { continue };
+                let Some(cu) = sk.curves.get(c) else { continue };
                 let CurveKind::Line { a, b } = cu.kind else { continue };
                 let (Some(a), Some(b)) = (sk.point(a), sk.point(b)) else { continue };
                 let m = (a + b) * 0.5;
@@ -127,7 +127,7 @@ pub fn find(sk: &Sketch, moving: &[(PointIdx, Vec2)], exclude: &[PointIdx], mm_p
     if best.is_none() {
         for &(mi, p) in moving {
             for &c in &free_curves {
-                let (Some(cu), Some(sh)) = (sk.curve(c), sk.shape(c)) else { continue };
+                let (Some(cu), Some(sh)) = (sk.curves.get(c), sk.shape(c)) else { continue };
                 let d = sh.dist(p);
                 if d < CURVE_PX * mm_px {
                     let q = sh.project(p);
@@ -180,7 +180,7 @@ pub fn moving_points(sk: &Sketch, entity: &str) -> (Vec<PointIdx>, Vec<PointIdx>
     let own: Vec<PointIdx> = if let Some(p) = sk.point_index(entity) {
         vec![p]
     } else {
-        match sk.curve_index(entity).and_then(|c| sk.curve(c)) {
+        match sk.curve_index(entity).and_then(|c| sk.curves.get(c)) {
             // Only lines slide whole; a circle or arc grabbed on its edge changes its radius.
             Some(c) if matches!(c.kind, CurveKind::Line { .. }) => c.kind.point_ids(),
             _ => Vec::new(),

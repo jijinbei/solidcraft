@@ -28,7 +28,7 @@ fn arc_centres(sk: &Sketch, curves: &[String]) -> Vec<(String, PointIdx, Vec2)> 
     curves
         .iter()
         .filter_map(|id| {
-            let CurveKind::Arc { c, .. } = sk.curve(sk.curve_index(id)?)?.kind else { return None };
+            let CurveKind::Arc { c, .. } = sk.curves.get(sk.curve_index(id)?)?.kind else { return None };
             Some((id.clone(), c, sk.point(c)?))
         })
         .collect()
@@ -72,7 +72,7 @@ fn offset_guard_live_child_follows_radius_then_retirement_is_honest() {
         child
             .iter()
             .filter_map(|id| {
-                let CurveKind::Arc { c, a, .. } = sk.curve(sk.curve_index(id)?)?.kind else { return None };
+                let CurveKind::Arc { c, a, .. } = sk.curves.get(sk.curve_index(id)?)?.kind else { return None };
                 Some(sk.point(c)?.dist(sk.point(a)?))
             })
             .collect::<Vec<_>>()

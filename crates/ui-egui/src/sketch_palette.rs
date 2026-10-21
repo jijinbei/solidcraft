@@ -122,7 +122,7 @@ pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
             .filter(|c| {
                 ss.sketch
                     .curve_index(c)
-                    .and_then(|i| ss.sketch.curve(i))
+                    .and_then(|i| ss.sketch.curves.get(i))
                     .is_some_and(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }))
             })
             .cloned()
@@ -159,7 +159,7 @@ fn selected_linetypes(app: &SolveApp) -> [bool; 4] {
     }
     let st = app.session.world_state();
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return types };
-    for c in curves.iter().filter_map(|id| ss.sketch.curve_index(id).and_then(|i| ss.sketch.curve(i))) {
+    for c in curves.iter().filter_map(|id| ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i))) {
         let k = if c.infinite {
             3
         } else if c.centerline {
@@ -192,7 +192,7 @@ pub fn set_linetype(app: &mut SolveApp, kind: u8) {
             .filter(|id| {
                 ss.sketch
                     .curve_index(id)
-                    .and_then(|i| ss.sketch.curve(i))
+                    .and_then(|i| ss.sketch.curves.get(i))
                     .is_some_and(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }))
             })
             .cloned()

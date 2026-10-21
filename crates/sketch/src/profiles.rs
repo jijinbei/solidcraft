@@ -104,18 +104,18 @@ fn without_overlaps(edges: &[Edge], tol: f64) -> Vec<bool> {
         .collect()
 }
 
-type Piece = (usize, usize, usize, usize);
+type Piece = (CurveIdx, usize, usize, usize);
 
 /// Prove each represented source uses all its original spans exactly once and consistently
 /// in one direction. Work and storage are bounded by the existing graph-edge budget.
-fn complete_loop(tags: &[Option<(Piece, bool)>], expected: &std::collections::HashMap<usize, Vec<usize>>, sk: &Sketch) -> Option<Vec<String>> {
+fn complete_loop(tags: &[Option<(Piece, bool)>], expected: &std::collections::HashMap<CurveIdx, Vec<usize>>, sk: &Sketch) -> Option<Vec<String>> {
     use std::collections::{BTreeMap, BTreeSet};
     if tags.is_empty() || tags.len() > MAX_EDGES {
         return None;
     }
     let mut seen = BTreeSet::new();
     let mut directions = BTreeMap::new();
-    let mut counts = BTreeMap::<usize, Vec<(usize, usize)>>::new();
+    let mut counts = BTreeMap::<CurveIdx, Vec<(usize, usize)>>::new();
     let mut previous_curve = tags.last().copied().flatten()?.0.0;
     let mut runs = BTreeSet::new();
     for tag in tags {
@@ -198,7 +198,7 @@ fn end_param(sh: &Shape, p: Vec2, tol: f64) -> Option<f64> {
 /// gets the whole segment; one that runs over part of it (cut by a crossing) gets the exact
 /// sub-segment, its ends moved to the true crossing with the neighbouring segment. Where that
 /// crossing cannot be found the loop keeps the polyline pieces.
-fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::collections::HashMap<usize, Vec<Seg2>>) -> Vec<Seg2> {
+fn restore_exact(segs: Vec<Seg2>, tags: &[Option<(Piece, bool)>], exact: &std::collections::HashMap<CurveIdx, Vec<Seg2>>) -> Vec<Seg2> {
     let n = segs.len();
     if n == 0 || tags.len() != n || tags.iter().all(Option::is_none) {
         return segs;
@@ -472,8 +472,8 @@ pub fn find_drawn_profiles(sk: &Sketch) -> Vec<Profile> {
         return find_profiles(sk);
     }
     let mut d = sk.clone();
-    for (ci, c) in d.curves.iter_mut().enumerate() {
-        if c.link.is_some() && !sk.is_text_curve(CurveIdx(ci)) {
+    for (ci, c) in d.curves.iter_enumerated_mut() {
+        if c.link.is_some() && !sk.is_text_curve(ci) {
             c.construction = true;
         }
     }
@@ -485,12 +485,10 @@ pub fn find_drawn_profiles(sk: &Sketch) -> Vec<Profile> {
 /// which the letter's own profile already has as a hole. What "all profiles" means for text:
 /// the letters, not the letters with their counters filled in.
 pub fn without_text_counters(sk: &Sketch, profiles: Vec<Profile>) -> Vec<Profile> {
-    let index: std::collections::HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
+    let index: std::collections::HashMap<&str, CurveIdx> = sk.curves.iter_enumerated().map(|(i, c)| (c.id.as_str(), i)).collect();
     let text_only: Vec<bool> = profiles
         .iter()
-        .map(|p| {
-            !p.outer_curves.is_empty() && p.outer_curves.iter().all(|id| index.get(id.as_str()).is_some_and(|ci| sk.is_text_curve(CurveIdx(*ci))))
-        })
+        .map(|p| !p.outer_curves.is_empty() && p.outer_curves.iter().all(|id| index.get(id.as_str()).is_some_and(|ci| sk.is_text_curve(*ci))))
         .collect();
     if !text_only.iter().any(|t| *t) {
         return profiles;
@@ -531,14 +529,14 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
     let tol = MERGE_TOL * 10.0;
     // Lines, arcs and circles (free-form curves take part as sampled pieces).
     let analytic =
-        |ci: usize| sk.curves.get(ci).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. } | CurveKind::Circle { .. }));
+        |ci: CurveIdx| sk.curves.get(ci).is_some_and(|c| matches!(c.kind, CurveKind::Line { .. } | CurveKind::Arc { .. } | CurveKind::Circle { .. }));
     // Analytic shapes of the profile curves.
-    let mut shapes: Vec<(usize, Shape)> = Vec::new();
+    let mut shapes: Vec<(CurveIdx, Shape)> = Vec::new();
     let mut tags: Vec<Option<Piece>> = Vec::new();
-    let mut exact: std::collections::HashMap<usize, Vec<Seg2>> = std::collections::HashMap::new();
+    let mut exact: std::collections::HashMap<CurveIdx, Vec<Seg2>> = std::collections::HashMap::new();
     let mut whole_graph_complete = true;
-    let mut expected = std::collections::HashMap::<usize, Vec<usize>>::new();
-    for (ci, c) in sk.curves.iter().enumerate() {
+    let mut expected = std::collections::HashMap::<CurveIdx, Vec<usize>>::new();
+    for (ci, c) in sk.curves.iter_enumerated() {
         if c.construction || c.centerline || c.infinite {
             continue;
         }
@@ -559,13 +557,13 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
                 }
             }
             CurveKind::Arc { .. } => {
-                if let Some(Seg2::Arc { center, radius, start, sweep }) = sk.segs(CurveIdx(ci)).into_iter().next() {
+                if let Some(Seg2::Arc { center, radius, start, sweep }) = sk.segs(ci).into_iter().next() {
                     shapes.push((ci, Shape::Round { c: center, r: radius, start, sweep }));
                 }
             }
             // Free-form curves take part as polylines of their exact segments; loops that use
             // a whole segment get the exact one back.
-            _ => match sk.exact_segs(CurveIdx(ci)) {
+            _ => match sk.exact_segs(ci) {
                 Some(ex) => {
                     let mut spans = Vec::with_capacity(ex.len());
                     for (k, seg) in ex.iter().enumerate() {
@@ -584,7 +582,7 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
                     exact.insert(ci, ex);
                 }
                 None => {
-                    for s in sk.segs(CurveIdx(ci)) {
+                    for s in sk.segs(ci) {
                         if let Seg2::Line { a, b } = s {
                             shapes.push((ci, Shape::Line { a, b }));
                         }
@@ -860,7 +858,7 @@ fn find_profiles_bounded(sk: &Sketch, max_edges: usize) -> Vec<Profile> {
             Shape::Round { c, r, start, sweep } => {
                 let full = sweep >= TAU - 1e-12;
                 if full && ts.is_empty() {
-                    loops.push((Loop2::circle(c, r), vec![id.clone()], usize::MAX - *ci, whole_graph_complete.then(|| vec![id.clone()])));
+                    loops.push((Loop2::circle(c, r), vec![id.clone()], usize::MAX - ci.0, whole_graph_complete.then(|| vec![id.clone()])));
                     continue;
                 }
                 let mut bounds: Vec<f64> =
@@ -1281,14 +1279,14 @@ mod whole_boundary_tests {
     #[test]
     fn whole_boundary_coverage_requires_every_piece_once_in_one_direction() {
         let mut sk = Sketch::new();
-        sk.add_circle(Vec2::ZERO, 5.0, None, Some("c1")).unwrap();
-        let expected = std::collections::HashMap::from([(0, vec![2, 3])]);
+        let c = sk.add_circle(Vec2::ZERO, 5.0, None, Some("c1")).unwrap();
+        let expected = std::collections::HashMap::from([(c, vec![2, 3])]);
         let full = vec![
-            Some(((0, 0, 0, 2), true)),
-            Some(((0, 0, 1, 2), true)),
-            Some(((0, 1, 0, 3), true)),
-            Some(((0, 1, 1, 3), true)),
-            Some(((0, 1, 2, 3), true)),
+            Some(((c, 0, 0, 2), true)),
+            Some(((c, 0, 1, 2), true)),
+            Some(((c, 1, 0, 3), true)),
+            Some(((c, 1, 1, 3), true)),
+            Some(((c, 1, 2, 3), true)),
         ];
         assert_eq!(complete_loop(&full, &expected, &sk), Some(vec!["c1".into()]));
         assert!(complete_loop(&full[..4], &expected, &sk).is_none());
@@ -1303,10 +1301,10 @@ mod whole_boundary_tests {
         assert!(complete_loop(&permuted, &expected, &sk).is_none());
         assert!(complete_loop(&full, &std::collections::HashMap::new(), &sk).is_none());
         // A skipped tiny graph span still belongs to the original curve and cannot be ignored.
-        let omitted = std::collections::HashMap::from([(0, vec![2, 4])]);
+        let omitted = std::collections::HashMap::from([(c, vec![2, 4])]);
         assert!(complete_loop(&full, &omitted, &sk).is_none());
         let mut reverse = full;
-        reverse[2] = Some(((0, 1, 0, 3), false));
+        reverse[2] = Some(((c, 1, 0, 3), false));
         assert!(complete_loop(&reverse, &expected, &sk).is_none());
     }
 

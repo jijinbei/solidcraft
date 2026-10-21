@@ -45,7 +45,7 @@ fn sampler_keeps_style_precedence_hidden_references_text_and_disjoint_parts() {
         called.push(i);
         vec![vec![Vec3::new(i.0 as f64, 0., 0.), Vec3::new(i.0 as f64, 1., 0.)], vec![Vec3::new(i.0 as f64, 3., 0.), Vec3::new(i.0 as f64, 4., 0.)]]
     });
-    assert_eq!(called, (0..sk.curves.len()).map(CurveIdx).collect::<Vec<_>>());
+    assert_eq!(called, sk.curves.indices().collect::<Vec<_>>());
     for (i, expected) in [
         colors::SKETCH,
         colors::SKETCH_LOCKED,

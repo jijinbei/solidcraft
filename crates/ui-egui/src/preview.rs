@@ -661,11 +661,10 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             let indices = sketch
                 .sketch
                 .curves
-                .iter()
-                .enumerate()
+                .iter_enumerated()
                 .filter_map(|(index, curve)| {
                     let unchanged = old_curves.contains(curve.id.as_str());
-                    if unchanged { None } else { Some(CurveIdx(index)) }
+                    if unchanged { None } else { Some(index) }
                 })
                 .collect::<Vec<_>>();
             let points = sketch

@@ -23,7 +23,7 @@ fn point_id(sk: &Sketch, i: PointIdx) -> Value {
 }
 
 fn curve_id(sk: &Sketch, i: CurveIdx) -> Value {
-    sk.curve(i).map_or(Value::Null, |c| json!(c.id))
+    sk.curves.get(i).map_or(Value::Null, |c| json!(c.id))
 }
 
 fn at(sk: &Sketch, i: PointIdx) -> Value {

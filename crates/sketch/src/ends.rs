@@ -55,7 +55,7 @@ impl EndReport {
 
 /// Curves profiles are made of (the ones `find_profiles` reads).
 fn profile_curve(sk: &Sketch, ci: CurveIdx) -> bool {
-    sk.curve(ci).is_some_and(|c| !(c.construction || c.centerline || c.infinite))
+    sk.curves.get(ci).is_some_and(|c| !(c.construction || c.centerline || c.infinite))
 }
 
 /// A box around a segment (conservative for curved ones).
@@ -86,8 +86,7 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
     let mut ends_at = vec![0usize; n];
     let mut held = vec![false; n];
     let mut ends: Vec<(PointIdx, CurveIdx)> = Vec::new();
-    for (ci, c) in sk.curves.iter().enumerate() {
-        let ci = CurveIdx(ci);
+    for (ci, c) in sk.curves.iter_enumerated() {
         if !profile_curve(sk, ci) {
             continue;
         }
@@ -139,8 +138,7 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
     free.sort_by(|a, b| a.2.x.total_cmp(&b.2.x));
     // What each free end touches: another curve's end first, else another curve's span.
     let mut touch: Vec<Option<EndTouch>> = vec![None; free.len()];
-    for (ci, c) in sk.curves.iter().enumerate() {
-        let ci = CurveIdx(ci);
+    for (ci, c) in sk.curves.iter_enumerated() {
         if !profile_curve(sk, ci) {
             continue;
         }

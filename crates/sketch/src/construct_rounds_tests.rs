@@ -708,7 +708,7 @@ fn hostile_lines_and_rounds_neither_panic_nor_change_the_report() {
 fn an_axis_aligned_line_angle_turned_half_a_turn_is_built_along_it() {
     let case = chain(&mut Lcg(31), 1.0, 1.0, 0.0, std::f64::consts::PI).unwrap();
     let sk = edited(&case);
-    let (i0, i1) = sk.curves[0].kind.ends().unwrap();
+    let (i0, i1) = sk.curves[CurveIdx(0)].kind.ends().unwrap();
     let s = seed_of(&sk);
     let (p0, e1) = (sk.points[i0].pos, s.pos[i1.0].unwrap_or_else(|| panic!("L1's end unplaced: {s:?}")));
     assert!((e1 - p0).dot(Vec2::X) < 0.0, "L1 built along the reference's axis, not its angle: {p0:?} → {e1:?}");

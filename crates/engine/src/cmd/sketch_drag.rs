@@ -91,12 +91,12 @@ impl Path {
                 }
             }
             Path::Radius { c, from, to } => {
-                if let Some(CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. }) = sk.curve_mut(*c).map(|x| &mut x.kind) {
+                if let Some(CurveKind::Circle { r, .. } | CurveKind::Ellipse { r, .. }) = sk.curves.get_mut(*c).map(|x| &mut x.kind) {
                     *r = from + (to - from) * t;
                 }
             }
             Path::ConicRho { c, from, to } => {
-                if let Some(CurveKind::Conic { rho, .. }) = sk.curve_mut(*c).map(|x| &mut x.kind) {
+                if let Some(CurveKind::Conic { rho, .. }) = sk.curves.get_mut(*c).map(|x| &mut x.kind) {
                     *rho = from + (to - from) * t;
                 }
             }
@@ -411,7 +411,7 @@ pub(super) struct LineGrab {
 impl LineGrab {
     fn new(sk: &Sketch, e: Ent, from: Vec2) -> Option<Self> {
         let Ent::Curve(curve) = e else { return None };
-        let CurveKind::Line { a, b } = sk.curve(curve)?.kind else { return None };
+        let CurveKind::Line { a, b } = sk.curves.get(curve)?.kind else { return None };
         let pa = sk.point(a)?;
         let d = sk.point(b)? - pa;
         let len2 = d.dot(d);
@@ -540,7 +540,7 @@ fn plan(sk: &Sketch, e: Ent, from: Vec2, to: Vec2) -> Option<(Path, Hold)> {
             if sk.curve_locked(c) {
                 return None;
             }
-            let kind = sk.curve(c).map(|x| x.kind.clone())?;
+            let kind = sk.curves.get(c).map(|x| x.kind.clone())?;
             let locked = sk.locked_points();
             let free = |q: &PointIdx| !locked.get(q.0).copied().unwrap_or(true);
             // A cursor on the centre leaves the radius as it is.
@@ -602,7 +602,7 @@ fn plan_group(sk: &Sketch, e: Ent, with: &[Ent], d: Vec2) -> Option<(Path, Hold)
         match *e {
             Ent::Point(q) => hold.points.push(q),
             Ent::Curve(c) => {
-                let Some(kind) = sk.curve(c).map(|x| &x.kind) else { continue };
+                let Some(kind) = sk.curves.get(c).map(|x| &x.kind) else { continue };
                 hold.points.extend(kind.point_ids());
                 if matches!(kind, CurveKind::Circle { .. } | CurveKind::Ellipse { .. }) {
                     hold.radii.push(c);
@@ -665,7 +665,7 @@ fn smallest_size(sk: &Sketch, hold: &Hold, group: Option<Group>) -> f64 {
     // group; without a group nothing is built.
     let in_group = |points: &dyn Fn() -> Vec<PointIdx>, curves: &[CurveIdx]| group.is_none_or(|g| g.has(&points(), curves));
     // A radius is the circle's own variable, or (an arc's) the distance between its points.
-    let radius_in_group = |c: CurveIdx| match sk.curve(c).map(|x| &x.kind) {
+    let radius_in_group = |c: CurveIdx| match sk.curves.get(c).map(|x| &x.kind) {
         Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. }) => in_group(&Vec::new, &[c]),
         Some(k) => in_group(&|| k.point_ids(), &[]),
         None => false,
@@ -699,7 +699,7 @@ fn smallest_size(sk: &Sketch, hold: &Hold, group: Option<Group>) -> f64 {
             }
         }
     }
-    for c in (0..sk.curves.len()).map(CurveIdx) {
+    for c in sk.curves.indices() {
         if let Some(r) = sk.radius(c) {
             take(r, &|| radius_in_group(c));
         }

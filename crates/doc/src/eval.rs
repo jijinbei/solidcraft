@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, Plane, Region2, UnitVec3, Vec2, Vec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
-use solidcraft_sketch::{CurveIdx, CurveKind, Profile, SolveReport, find_profiles};
+use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
@@ -3545,7 +3545,7 @@ pub(crate) fn revolve_axis(ss: &SolvedSketch, axis: &AxisRef, construct: &dyn Fn
     match axis {
         AxisRef::SketchLine { curve } => {
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
-            match ss.sketch.curve(ci).map(|c| &c.kind) {
+            match ss.sketch.curves.get(ci).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => {
                     let (pa, pb) = (ss.sketch.point(*a).unwrap_or_default(), ss.sketch.point(*b).unwrap_or_default());
                     Ok((pa, pb - pa))
@@ -6497,9 +6497,12 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
                     // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
-                    let curves: Vec<Vec<solidcraft_geom::Seg2>> = (0..ss.sketch.curves.len())
-                        .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
-                        .map(|ci| ss.sketch.segs(CurveIdx(ci)))
+                    let curves: Vec<Vec<solidcraft_geom::Seg2>> = ss
+                        .sketch
+                        .curves
+                        .iter_enumerated()
+                        .filter(|(_, c)| !c.construction)
+                        .map(|(ci, _)| ss.sketch.segs(ci))
                         .filter(|segs| !segs.is_empty())
                         .collect();
                     if curves.is_empty() {

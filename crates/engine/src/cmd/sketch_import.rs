@@ -174,7 +174,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let sk = &ss.sketch;
     let mut geom = Vec::new();
-    for (i, c) in sk.curves.iter().enumerate() {
+    for (i, c) in sk.curves.iter_enumerated() {
         if c.construction {
             continue;
         }
@@ -185,7 +185,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
             CurveKind::Circle { c, r } => geom.push(Geom2::Circle(pt(*c), *r)),
             CurveKind::Arc { c, a, b } => geom.push(Geom2::Arc { c: pt(*c), a: pt(*a), b: pt(*b) }),
             _ => {
-                let poly = sk.polyline(CurveIdx(i));
+                let poly = sk.polyline(i);
                 geom.extend(poly.windows(2).map(|w| Geom2::Line(w[0], w[1])));
             }
         }

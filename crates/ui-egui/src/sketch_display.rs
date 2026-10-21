@@ -32,7 +32,7 @@ pub fn pixel_view(proj: &Proj, ppp: f32) -> PixelCurveView {
 fn display_segs(sketch: &Sketch, index: CurveIdx, plane: &Plane, proj: &Proj) -> Vec<solidcraft_engine::geom::Seg2> {
     use solidcraft_engine::geom::Seg2;
     let segs = sketch.exact_segs(index).unwrap_or_else(|| sketch.segs(index));
-    if !sketch.curve(index).is_some_and(|c| c.infinite) {
+    if !sketch.curves.get(index).is_some_and(|c| c.infinite) {
         return segs;
     }
     let target = proj.cam.target - plane.origin;

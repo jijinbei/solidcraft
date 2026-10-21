@@ -3,7 +3,6 @@
 //! degenerate is left behind).
 
 use serde_json::{Value, json};
-use solidcraft_sketch::CurveIdx;
 
 use crate::Session;
 
@@ -33,8 +32,8 @@ fn sound(s: &Session) {
     for p in &ss.sketch.points {
         assert!(p.pos.is_finite(), "point {} is {:?}", p.id, p.pos);
     }
-    for (i, c) in ss.sketch.curves.iter().enumerate() {
-        let len: f64 = ss.sketch.segs(CurveIdx(i)).iter().map(|g| g.length()).sum();
+    for (i, c) in ss.sketch.curves.iter_enumerated() {
+        let len: f64 = ss.sketch.segs(i).iter().map(|g| g.length()).sum();
         assert!(len.is_finite() && len > 1e-9, "curve {} has length {len}", c.id);
     }
 }

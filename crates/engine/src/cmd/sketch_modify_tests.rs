@@ -57,7 +57,7 @@ fn explicit_freeform_break_preserves_exact_geometry_and_undo() {
         let out = run(&mut s, "sketch.break", json!({"curve": id, "points": [b, a, a]}));
         assert!(ids(&out["curves"]).len() >= 3, "{command}: {out}");
         let after = sketch(&s);
-        let segs: Vec<_> = after.curves.iter().enumerate().flat_map(|(i, _)| after.exact_segs(CurveIdx(i)).unwrap_or_default()).collect();
+        let segs: Vec<_> = after.curves.iter_enumerated().flat_map(|(i, _)| after.exact_segs(i).unwrap_or_default()).collect();
         for old in &exact {
             for k in 0..=40 {
                 let q = old.point_at(k as f64 / 40.0);
@@ -880,10 +880,10 @@ fn fillet_a_corner_a_construction_diagonal_ends_in() {
     assert!(c.dist(Vec2::new(48.0, 2.0)) < 1e-6, "{c:?}");
     // The diagonal still runs from (0, 30) to the sharp corner (50, 0).
     let di = sk.curve_index(&diag).unwrap();
-    let Some(CurveKind::Line { a, b }) = sk.curve(di).map(|x| &x.kind) else { panic!("the diagonal is a line") };
+    let Some(CurveKind::Line { a, b }) = sk.curves.get(di).map(|x| &x.kind) else { panic!("the diagonal is a line") };
     let (pa, pb) = (sk.point(*a).unwrap(), sk.point(*b).unwrap());
     assert!(pa.dist(Vec2::new(0.0, 30.0)) < 1e-6 && pb.dist(Vec2::new(50.0, 0.0)) < 1e-6, "{pa:?} {pb:?}");
-    assert!(sk.curve(di).unwrap().construction);
+    assert!(sk.curves.get(di).unwrap().construction);
     // Three lines at a corner, none of them construction, stay ambiguous.
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [50, 0], [50, 30]], "ids": ["a", "b"]}));
@@ -1003,11 +1003,11 @@ fn irregular_closed_spline_offset_certificate_edits_undoes_and_reopens() {
     let result = run(&mut s, "sketch.offset", json!({"curves":["s1"],"distance":2.0,"chain":true}));
     let output = result["curves"][0].as_str().unwrap().to_string();
     let parameter = result["param"].as_str().unwrap().to_string();
-    let point_ids = sketch(&s).curves[1].kind.point_ids();
+    let point_ids = sketch(&s).curves[CurveIdx(1)].kind.point_ids();
     let verify = |s: &Session, distance: f64| {
         let state = s.world_state();
         let sk = &state.sketch(1).unwrap().sketch;
-        assert_eq!(sk.curves[0], original.curves[0]);
+        assert_eq!(sk.curves.first(), original.curves.first());
         assert_eq!(&sk.points.as_slice()[..original.points.len()], original.points.as_slice());
         let index = sk.curve_index(&output).unwrap();
         assert_eq!(sk.curves[index].kind.point_ids(), point_ids);
@@ -1444,7 +1444,7 @@ fn offset_both_sides_of_a_rounded_boundary_keep_separate_associations() {
         let mut r: Vec<f64> = curves
             .iter()
             .filter_map(|id| {
-                let CurveKind::Arc { c, a, .. } = sk.curve(sk.curve_index(id)?)?.kind else { return None };
+                let CurveKind::Arc { c, a, .. } = sk.curves.get(sk.curve_index(id)?)?.kind else { return None };
                 Some(sk.point(c)?.dist(sk.point(a)?))
             })
             .collect();
@@ -1470,7 +1470,7 @@ fn offset_both_sides_of_a_circle_are_concentric() {
     // Symmetric by 3 on a 10 mm circle: a 7 mm circle and a 13 mm one, both about the centre.
     let o = run(&mut s, "sketch.offset", json!({"curves": [c], "distance": 3, "symmetric": true}));
     let sk = sketch(&s);
-    let radius = |id: &str| match sk.curve(sk.curve_index(id).unwrap()).unwrap().kind {
+    let radius = |id: &str| match sk.curves.get(sk.curve_index(id).unwrap()).unwrap().kind {
         CurveKind::Circle { c, r } => (sk.point(c).unwrap(), r),
         _ => panic!("not a circle"),
     };
@@ -1887,10 +1887,7 @@ fn trim_piece_is_what_a_trim_there_takes_away() {
         assert!(near(mid, inside), "{at:?}: {mid:?}");
         run(&mut s, "sketch.trim", json!({"curve": curve, "at": at}));
         let sk = sketch(&s);
-        assert!(
-            !(0..sk.curves.len()).filter_map(|i| sk.shape(CurveIdx(i))).any(|sh| sh.dist(mid) < 1e-6),
-            "the trim at {at:?} took the piece shown away"
-        );
+        assert!(!sk.curves.indices().filter_map(|i| sk.shape(i)).any(|sh| sh.dist(mid) < 1e-6), "the trim at {at:?} took the piece shown away");
     }
     let mut s = new_sketch();
     let lone = ids(&run(&mut s, "sketch.line", json!({"points": [[0,0], [8,0]], "connect": false}))["curves"])[0].clone();

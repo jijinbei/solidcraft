@@ -313,7 +313,7 @@ fn sample(rng: &mut Lcg, make: &mut dyn FnMut(&mut Lcg) -> Option<Case>) -> Case
 /// points: circle, horizontal or vertical line), as the propagation seed does it.
 fn propagation_places_all(sk: &Sketch) -> bool {
     let mut placed = sk.locked_points();
-    let ends = |l: CurveIdx| match sk.curve(l).map(|c| &c.kind) {
+    let ends = |l: CurveIdx| match sk.curves.get(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => Some((*a, *b)),
         _ => None,
     };

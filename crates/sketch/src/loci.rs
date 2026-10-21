@@ -765,7 +765,7 @@ fn levels(lines: &[Option<(usize, usize)>], cons: &[&ConstraintKind]) -> Vec<Opt
 /// A circle or arc of `sk` (with valid point indices).
 fn round_of(sk: &Sketch, k: CurveIdx) -> Option<Round> {
     let n = sk.points.len();
-    match sk.curve(k)?.kind {
+    match sk.curves.get(k)?.kind {
         CurveKind::Circle { c, .. } if c.0 < n => Some(Round { c: c.0, ends: None }),
         CurveKind::Arc { c, a, b } if c.0 < n && a.0 < n && b.0 < n && c != a && c != b => Some(Round { c: c.0, ends: Some((a.0, b.0)) }),
         _ => None,
@@ -827,7 +827,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(PointIdx) -> Option<Vec2>, on_cu
             _ => None,
         })
         .collect();
-    let rounds: Vec<Option<Round>> = (0..m).map(|k| round_of(sk, CurveIdx(k))).collect();
+    let rounds: Vec<Option<Round>> = sk.curves.indices().map(|k| round_of(sk, k)).collect();
     let line = |l: CurveIdx| lines.get(l.0).copied().flatten();
     let round = |k: CurveIdx| rounds.get(k.0).copied().flatten();
     let cons: Vec<&ConstraintKind> = sk.constraints.iter().filter(|c| !c.driven && !sk.follows_its_source(&c.kind)).map(|c| &c.kind).collect();
@@ -911,7 +911,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(PointIdx) -> Option<Vec2>, on_cu
                     }
                 } else if let (Some(r1), Some(r2), Some(k1), Some(k2)) = (r_of(a), r_of(b), round(a), round(b)) {
                     // External or internal, as the residual picks it on the reference.
-                    let ref_r = |k: CurveIdx, rd: Round| match (sk.curve(k).map(|c| &c.kind), rd.ends) {
+                    let ref_r = |k: CurveIdx, rd: Round| match (sk.curves.get(k).map(|c| &c.kind), rd.ends) {
                         (Some(CurveKind::Circle { r, .. }), _) => Some(*r),
                         (_, Some((s, _))) => Some(rf(rd.c)?.dist(rf(s)?)),
                         _ => None,
@@ -1016,7 +1016,7 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(PointIdx) -> Option<Vec2>, on_cu
         }
         // A row or column gives no sign: the reference's (a line with a line angle has its
         // own, and no level).
-        for l in (0..m).map(CurveIdx) {
+        for l in sk.curves.indices() {
             if let Some(row) = level_of(l) {
                 let axis = if row { Vec2::X } else { Vec2::Y };
                 let d = if ref_dir(l).is_some_and(|d| d.dot(axis) < 0.0) { -axis } else { axis };

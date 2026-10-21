@@ -69,7 +69,7 @@ fn keep(i: Option<Inference>) -> Option<Inference> {
     i
 }
 
-fn line_ends(sk: &Sketch, c: usize) -> Option<(Vec2, Vec2)> {
+fn line_ends(sk: &Sketch, c: CurveIdx) -> Option<(Vec2, Vec2)> {
     match sk.curves.get(c)?.kind {
         CurveKind::Line { a, b } => Some((sk.point(a)?, sk.point(b)?)),
         _ => None,
@@ -80,11 +80,10 @@ fn line_ends(sk: &Sketch, c: usize) -> Option<(Vec2, Vec2)> {
 /// tangent point (within `tol`).
 pub fn tangent(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
     let mut best: Option<Inference> = None;
-    for (i, c) in sk.curves.iter().enumerate() {
+    for (i, c) in sk.curves.iter_enumerated() {
         if c.construction || !matches!(c.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }) {
             continue;
         }
-        let i = CurveIdx(i);
         let (Some(o), Some(r)) = (sk.center(i), sk.radius(i)) else { continue };
         let d = prev.dist(o);
         if d <= r + 1e-9 {
@@ -172,7 +171,7 @@ pub fn lines(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
     if v.len() < tol * 2.0 {
         return keep(None);
     }
-    for (i, c) in sk.curves.iter().enumerate() {
+    for (i, c) in sk.curves.iter_enumerated() {
         if c.construction && c.link.is_none() {
             continue;
         }

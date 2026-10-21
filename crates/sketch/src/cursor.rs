@@ -57,7 +57,7 @@ pub fn move_line_towards(
     if !grab.is_finite() {
         return false;
     }
-    let Some(CurveKind::Line { a, b }) = sk.curve(line).map(|c| &c.kind) else { return false };
+    let Some(CurveKind::Line { a, b }) = sk.curves.get(line).map(|c| &c.kind) else { return false };
     let (Some(pa), Some(pb)) = (sk.point(*a), sk.point(*b)) else { return false };
     let d = pb - pa;
     if !(d.dot(d) > 1e-18 && crate::model::in_range(pa + weighted(d, grab))) {

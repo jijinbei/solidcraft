@@ -861,7 +861,7 @@ mod tests {
             h.app.session.doc.sketch(sid).unwrap().link(&link).unwrap().source,
             LinkSource::Text { text: "O".into(), at, height, angle, font: None, style: TextStyle::default(), exprs: Default::default() }
         );
-        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[CurveIdx(0)].id.clone() }];
         h.app.start("sketch.edit_text");
         h.frames(3);
         let undo = h.app.session.undo.len();
@@ -888,7 +888,7 @@ mod tests {
         // The dialog closes with the selection; the text's first outline is selected again to open it.
         let reopen = |h: &mut Harness| {
             let sid = h.app.session.active_sketch.unwrap();
-            let id = h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone();
+            let id = h.app.session.doc.sketch(sid).unwrap().curves[CurveIdx(0)].id.clone();
             h.app.session.selection = vec![Sel::SketchCurve { id }];
             h.app.start("sketch.edit_text");
             h.frames(3);
@@ -1408,7 +1408,7 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), undo + 1);
         // Reopened, the dialog shows them.
         let sid = h.app.session.active_sketch.unwrap();
-        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[0].id.clone() }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: h.app.session.doc.sketch(sid).unwrap().curves[CurveIdx(0)].id.clone() }];
         h.app.start("sketch.edit_text");
         h.frames(3);
         assert_eq!(tx(&h.app).style, live);

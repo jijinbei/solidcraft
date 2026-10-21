@@ -57,7 +57,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         ps.dedup();
         let entity_ids: Vec<String> = cs
             .iter()
-            .filter_map(|i| sk.curve(*i).map(|c| c.id.clone()))
+            .filter_map(|i| sk.curves.get(*i).map(|c| c.id.clone()))
             .chain(ps.iter().filter_map(|i| sk.points.get(*i).map(|p| p.id.clone())))
             .collect();
         if let Some(old) = &old {
@@ -235,7 +235,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                     cons.push(add_c(sk, ConstraintKind::PatternPoint { p: *p, q: *q, center, angle, offset: base_offset, directions })?);
                 }
                 for (a, b) in cs.iter().zip(&made) {
-                    if matches!(sk.curve(*a).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. })) {
+                    if matches!(sk.curves.get(*a).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. })) {
                         cons.push(add_c(sk, ConstraintKind::PatternRadius { a: *a, b: *b })?);
                     }
                 }

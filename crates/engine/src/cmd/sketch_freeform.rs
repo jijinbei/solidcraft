@@ -35,7 +35,7 @@ fn point_at(segs: &[Seg2], u: f64) -> Vec2 {
 
 /// Closest point on curve `ci` (exact pieces, or the analytic shape).
 fn project(sk: &Sketch, ci: CurveIdx, p: Vec2) -> Vec2 {
-    if sk.curve(ci).is_some_and(|c| c.kind.is_freeform()) {
+    if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
         let segs = pieces(sk, ci);
         let (u, _) = locate(&segs, p);
         return point_at(&segs, u);
@@ -57,8 +57,7 @@ fn cuts(sk: &Sketch, ci: CurveIdx, segs: &[Seg2], only_freeform: bool) -> Vec<(f
         let (t, u) = ((c - a).cross(s) / den, (c - a).cross(r) / den);
         ((-1e-9..=1.0 + 1e-9).contains(&t) && (-1e-9..=1.0 + 1e-9).contains(&u)).then(|| a + r * t)
     };
-    for (oi, curve) in sk.curves.iter().enumerate() {
-        let oi = CurveIdx(oi);
+    for (oi, curve) in sk.curves.iter_enumerated() {
         if oi == ci || (only_freeform && !curve.kind.is_freeform()) {
             continue;
         }
@@ -72,7 +71,7 @@ fn cuts(sk: &Sketch, ci: CurveIdx, segs: &[Seg2], only_freeform: bool) -> Vec<(f
             }
         }
         // End points of the other curve lying on this one.
-        if let Some((a, b)) = sk.curve(oi).and_then(|c| c.kind.ends()) {
+        if let Some((a, b)) = sk.curves.get(oi).and_then(|c| c.kind.ends()) {
             for q in [a, b].iter().filter_map(|q| sk.point(*q)) {
                 if locate(segs, q).1 < 1e-6 {
                     found.push(q);
@@ -175,7 +174,7 @@ fn add_pieces(sk: &mut Sketch, segs: &[Seg2], start: Option<PointIdx>, end: Opti
             Seg2::Arc { .. } => return Err(bad("trim", "unexpected arc piece")),
         };
         let c = sk.add_curve(kind, None)?;
-        if let Some(cu) = sk.curve_mut(c) {
+        if let Some(cu) = sk.curves.get_mut(c) {
             cu.construction = construction;
         }
         made.push(c);
@@ -221,8 +220,8 @@ fn modify(sk: &mut Sketch, ci: CurveIdx, at: Vec2, remove: bool, points: Option<
         cuts(sk, ci, &segs, false).into_iter().filter(|c| closed || (c.0 > 1e-9 && c.0 < n - 1e-9)).map(|(u, q, c)| (u, q, Some(c))).collect()
     };
     let (uq, _) = locate(&segs, at);
-    let ends = sk.curve(ci).and_then(|c| c.kind.ends());
-    let construction = sk.curve(ci).is_some_and(|c| c.construction);
+    let ends = sk.curves.get(ci).and_then(|c| c.kind.ends());
+    let construction = sk.curves.get(ci).is_some_and(|c| c.construction);
     // Intervals between consecutive cuts (closed curves wrap round).
     let mut bounds: Vec<(f64, Option<CurveIdx>)> = cs.iter().map(|c| (c.0, c.2)).collect();
     if bounds.is_empty() {
@@ -280,7 +279,7 @@ fn modify(sk: &mut Sketch, ci: CurveIdx, at: Vec2, remove: bool, points: Option<
             add_c(sk, ConstraintKind::PointOnCurve { p: *pi, c: *oi })?;
         }
     }
-    let ids: Vec<String> = made.iter().filter_map(|c| sk.curve(*c).map(|c| c.id.clone())).collect();
+    let ids: Vec<String> = made.iter().filter_map(|c| sk.curves.get(*c).map(|c| c.id.clone())).collect();
     // The removed piece, for previews (`sketch.trim.path`).
     let removed: Vec<[f64; 2]> = gone
         .and_then(|k| intervals.get(k))

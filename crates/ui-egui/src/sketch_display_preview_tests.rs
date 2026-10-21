@@ -218,7 +218,7 @@ fn slot_preview_matches_every_committed_side_and_cap() {
         let state = h.app.session.world_state();
         let committed = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(preview.curves.len(), committed.curves.len(), "{command}");
-        for index in (0..committed.curves.len()).map(CurveIdx) {
+        for index in committed.curves.indices() {
             let a = preview.exact_segs(index).unwrap_or_else(|| preview.segs(index));
             let b = committed.exact_segs(index).unwrap_or_else(|| committed.segs(index));
             assert_eq!(a.len(), b.len(), "{command}, curve {index}");

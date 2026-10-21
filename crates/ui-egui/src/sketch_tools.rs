@@ -390,8 +390,7 @@ pub fn refine_snap(
     let mid_tol = if mid_only { tol * 1.5 } else { tol };
     let mut best: Option<(f64, &'static str, Vec2)> = None;
     let mut mid_of: Option<String> = None;
-    for (i, c) in sk.curves.iter().enumerate() {
-        let i = CurveIdx(i);
+    for (i, c) in sk.curves.iter_enumerated() {
         if let solidcraft_engine::sketch::CurveKind::Line { .. } = c.kind
             && let Some(solidcraft_engine::sketch::Shape::Line { a, b }) = sk.shape(i)
         {
@@ -435,8 +434,8 @@ pub fn refine_snap(
     }
     // On a curve (coincident with it).
     if !mid_only && best.is_none() {
-        for (i, c) in sk.curves.iter().enumerate() {
-            let Some(sh) = sk.shape(CurveIdx(i)) else { continue };
+        for (i, c) in sk.curves.iter_enumerated() {
+            let Some(sh) = sk.shape(i) else { continue };
             let d = sh.dist(lp);
             if d < tol * 0.8 && best.is_none_or(|x| d < x.0) {
                 let q = sh.project(lp);
@@ -695,12 +694,7 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 /// ignored when more than two meet. Each side must be a line, or an arc for a fillet.
 pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: PointIdx, arcs_ok: bool) -> Option<(CurveIdx, CurveIdx)> {
     use solidcraft_engine::sketch::CurveKind;
-    let candidates = sk
-        .curves
-        .iter()
-        .enumerate()
-        .map(|(ci, c)| (CurveIdx(ci), c))
-        .filter(|(ci, c)| !sk.is_linked_curve(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
+    let candidates = sk.curves.iter_enumerated().filter(|(ci, c)| !sk.is_linked_curve(*ci) && c.kind.ends().is_some_and(|(a, b)| a == pi || b == pi));
     let mut curves: Vec<_> = candidates.clone().take(3).collect();
     // Center rectangles have construction diagonals at their corners. Match the engine's
     // corner selection: when more than two curves meet, use the profile sides.
