@@ -6,7 +6,7 @@ use std::f64::consts::TAU;
 use serde_json::{Value, json};
 use solidcraft_doc::ProfileSel;
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, Curve, CurveIdx, CurveKind, PointIdx, Shape, Sketch, intersections, intersections_within};
+use solidcraft_sketch::{ConstraintKind, Curve, CurveIdx, CurveKind, Hold, PointIdx, Shape, Sketch, intersections, intersections_within};
 
 use super::sketch::{add_c, edit, ids_of, solve_current};
 use super::{CommandSpec, in_sketch};
@@ -684,7 +684,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
         }
         pin(sk, end, oi)?;
         let before = sk.points.iter().map(|p| p.pos).collect::<Vec<_>>();
-        let hold = solidcraft_sketch::Hold { points: sk.points.indices().filter(|i| *i != end).collect(), radii: sk.curves.indices().collect() };
+        let hold = Hold { points: sk.points.indices().filter(|i| *i != end).collect(), radii: sk.curves.indices().collect() };
         if !solidcraft_sketch::solve_with(sk, &hold, None, solidcraft_sketch::Analysis::StatusOnly, None).ok()
             || sk.point(end).is_none_or(|point| point.dist(q) > TOL)
             || sk.points.iter_enumerated().zip(&before).any(|((i, point), b)| i != end && point.pos.dist(*b) > TOL)

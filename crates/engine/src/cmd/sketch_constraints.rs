@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, CurveIdx, CurveKind, PointIdx, Sketch};
+use solidcraft_sketch::{ConstraintKind, CurveIdx, CurveKind, Hold, PointIdx, Sketch};
 
 use super::sketch::{add_c, constraint_result, dof_now, edit, listed, redundancy, residual_of};
 use super::{CommandSpec, in_sketch};
@@ -139,7 +139,7 @@ fn try_add(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, k: ConstraintKin
         return None;
     }
     let mut trial = sk.clone();
-    let rep = solidcraft_sketch::solve_with(&mut trial, &solidcraft_sketch::Hold::default(), None, solidcraft_sketch::Analysis::Freedom, None);
+    let rep = solidcraft_sketch::solve_with(&mut trial, &Hold::default(), None, solidcraft_sketch::Analysis::Freedom, None);
     if rep.ok() && rep.dof < dof {
         *sk = trial;
         return Some(rep.dof);

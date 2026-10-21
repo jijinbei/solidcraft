@@ -7,7 +7,7 @@
 use super::*;
 use crate::construct::switch;
 use crate::model::{Constraint, ConstraintKind, CurveIdx, CurveKind, PointIdx, Sketch};
-use crate::solver::{SolveReport, solve};
+use crate::solver::{Hold, SolveReport, solve};
 
 use crate::tests::Lcg;
 
@@ -573,7 +573,7 @@ fn a_cluster_pinned_at_one_point_turns_about_it() {
         let jump = rng.range(0.0, std::f64::consts::TAU);
         let to = pin + Vec2::from_angle(jump) * rng.range(5.0, 40.0);
         sk.points[ids[0]].pos = to;
-        let hold = crate::solver::Hold { points: vec![ids[0]], radii: vec![] };
+        let hold = Hold { points: vec![ids[0]], radii: vec![] };
         let mut lm = sk.clone();
         let lm_rep = switch::without_seed(|| crate::solve_with(&mut lm, &hold, Some(&reference), crate::Analysis::Full, None));
         lm_mirrored += usize::from(lm_rep.ok() && signature(&checks, &current(&lm)) != before);
@@ -723,7 +723,7 @@ fn a_drag_frame_decomposes_within_its_budget() {
     let (frame, full) = (work(FRAME_WORK), work(MAX_WORK));
     assert!(frame > FRAME_WORK / 2 && frame <= FRAME_WORK + FRAME_WORK / 100, "frame work {frame}");
     assert!(full > 10 * FRAME_WORK, "full work {full}");
-    let hold = crate::Hold::default();
+    let hold = Hold::default();
     assert!(
         switch::without_differential(|| crate::solve_with(&mut sk.clone(), &hold, None, crate::Analysis::StatusOnly, Some(&mut Budget::frame())))
             .ok()
