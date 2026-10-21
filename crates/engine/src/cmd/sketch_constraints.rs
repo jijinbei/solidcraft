@@ -177,8 +177,7 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
         }
     }
     // Horizontal / vertical lines, tangent line–arc and arc–arc joints.
-    let nc = sk.curves.len();
-    for i in (0..nc).map(CurveIdx) {
+    for i in sk.curves.indices() {
         if let Some(CurveKind::Line { a, b }) = sk.curves.get(i).map(|c| c.kind.clone())
             && let (Some(pa), Some(pb)) = (sk.point(a), sk.point(b))
         {
@@ -192,8 +191,8 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
             }
         }
     }
-    for i in (0..nc).map(CurveIdx) {
-        for j in (i.0 + 1..nc).map(CurveIdx) {
+    for i in sk.curves.indices() {
+        for j in sk.curves.indices().skip(i.0 + 1) {
             let (Some(ci), Some(cj)) = (sk.curves.get(i), sk.curves.get(j)) else { continue };
             let round = |k: &CurveKind| matches!(k, CurveKind::Arc { .. } | CurveKind::Circle { .. });
             if !(round(&ci.kind) || round(&cj.kind)) {
@@ -218,7 +217,7 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
         }
     }
     if dims {
-        for i in (0..nc).map(CurveIdx) {
+        for i in sk.curves.indices() {
             let k = match sk.curves.get(i).map(|c| (c.kind.clone(), c.construction)) {
                 Some((CurveKind::Circle { r, .. }, false)) => Diameter { c: i, value: 2.0 * r },
                 Some((CurveKind::Arc { .. }, false)) => Radius { c: i, value: sk.radius(i).unwrap_or(1.0) },
