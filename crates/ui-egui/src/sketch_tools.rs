@@ -10,7 +10,7 @@ use std::cell::{Cell, RefCell};
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::{Vec2, Vec3};
-use solidcraft_engine::sketch::CurveIdx;
+use solidcraft_engine::sketch::{CurveIdx, PointIdx};
 
 use crate::SolveApp;
 use crate::tool_modifiers::{Audit, Binding, Match, ModAction, ModifierCombo, Scope, ToolModifiers, Trigger};
@@ -693,11 +693,7 @@ fn sketch_entity(app: &SolveApp, hits: &[Hit]) -> Option<(String, bool)> {
 /// The two editable curves that meet at sketch point `pi`, in curve order, which is the order
 /// the corner commands resolve them in from a `point` parameter. Construction curves are
 /// ignored when more than two meet. Each side must be a line, or an arc for a fillet.
-pub(crate) fn corner_curves(
-    sk: &solidcraft_engine::sketch::Sketch,
-    pi: solidcraft_engine::sketch::PointIdx,
-    arcs_ok: bool,
-) -> Option<(CurveIdx, CurveIdx)> {
+pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: PointIdx, arcs_ok: bool) -> Option<(CurveIdx, CurveIdx)> {
     use solidcraft_engine::sketch::CurveKind;
     let candidates = sk
         .curves
@@ -734,7 +730,7 @@ pub(crate) fn corner_point(app: &SolveApp, proj: &Proj, pos: Pos2, arcs_ok: bool
             if distance >= 8.0 {
                 return None;
             }
-            corner_curves(sk, solidcraft_engine::sketch::PointIdx(pi), arcs_ok)?;
+            corner_curves(sk, PointIdx(pi), arcs_ok)?;
             Some((distance, point.pos, point.id.clone()))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
@@ -1385,7 +1381,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
 }
 
 /// The curves and points a constraint ties together.
-fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<CurveIdx>, Vec<solidcraft_engine::sketch::PointIdx>) {
+fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<CurveIdx>, Vec<PointIdx>) {
     use solidcraft_engine::sketch::ConstraintKind::*;
     match *k {
         Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![], vec![p, q]),
@@ -1427,7 +1423,7 @@ fn glyph_anchors(sk: &solidcraft_engine::sketch::Sketch, k: &solidcraft_engine::
         }
         poly.first().map(|p| (*p, None))
     };
-    let pt = |p: solidcraft_engine::sketch::PointIdx| sk.point(p).map(|q| (q, None));
+    let pt = |p: PointIdx| sk.point(p).map(|q| (q, None));
     match *k {
         Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } => pt(p).into_iter().collect(),
         PatternPoint { p, center, .. } => pt(center.unwrap_or(p)).into_iter().collect(),

@@ -6,6 +6,7 @@ use crate::EmbossFace;
 use crate::apply_point;
 use crate::sheet;
 use solidcraft_geom::{Aabb3, Loop2, Ring, Seg2};
+use solidcraft_sketch::CurveIdx;
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     match &f.kind {
@@ -523,7 +524,7 @@ pub(super) fn sheet_eval(
                     .enumerate()
                     .filter(|(_, c)| !c.construction)
                     .flat_map(|(ci, c)| {
-                        ss.sketch.segs(solidcraft_sketch::CurveIdx(ci)).into_iter().filter_map(move |sg| match sg {
+                        ss.sketch.segs(CurveIdx(ci)).into_iter().filter_map(move |sg| match sg {
                             Seg2::Line { a, b } => Some((c.id.clone(), a, b)),
                             _ => None,
                         })

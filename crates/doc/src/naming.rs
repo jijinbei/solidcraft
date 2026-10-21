@@ -22,6 +22,7 @@ use solidcraft_geom::{Aabb3, Mesh, Seg2, Vec2, Vec3};
 use crate::history_names::Names;
 use crate::lineage::Lineage;
 use crate::{Feature, FeatureKind, ModelBody, ModelState};
+use solidcraft_sketch::CurveIdx;
 
 /// How a body came to be: the feature and the model just before it.
 #[derive(Debug)]
@@ -690,7 +691,7 @@ fn nearest_curve_dist(ss: &crate::SolvedSketch, q: Vec2) -> Option<(f64, String)
         if c.construction {
             continue;
         }
-        for s in ss.sketch.segs(solidcraft_sketch::CurveIdx(ci)) {
+        for s in ss.sketch.segs(CurveIdx(ci)) {
             let d = seg_dist(&s, q);
             if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
                 best = Some((d, c.id.clone()));
@@ -707,7 +708,7 @@ fn nearest_curve(ss: &crate::SolvedSketch, q: Vec2) -> Option<String> {
         if c.construction {
             continue;
         }
-        for s in ss.sketch.segs(solidcraft_sketch::CurveIdx(ci)) {
+        for s in ss.sketch.segs(CurveIdx(ci)) {
             let d = seg_dist(&s, q);
             if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
                 best = Some((d, c.id.clone()));

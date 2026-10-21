@@ -663,6 +663,7 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+    use solidcraft_engine::sketch::CurveIdx;
 
     fn setup() -> (Harness, String, String) {
         let (mut h, link, curve) = crate::test_support::selected_text("I", [0, 0]);
@@ -997,7 +998,7 @@ mod tests {
         h.app.cam.distance = 40.0;
         h.frames(3);
         let sid = h.app.session.active_sketch.unwrap();
-        let polyline = h.app.session.doc.sketch(sid).unwrap().polyline(solidcraft_engine::sketch::CurveIdx(0));
+        let polyline = h.app.session.doc.sketch(sid).unwrap().polyline(CurveIdx(0));
         let midpoint = (polyline[0] + polyline[1]) * 0.5;
         h.step(&json!({"start":"sketch.edit_text"})).unwrap();
         assert!(h.app.tool.is_some());

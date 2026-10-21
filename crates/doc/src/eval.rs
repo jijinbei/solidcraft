@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, Plane, Region2, UnitVec3, Vec2, Vec3, regions_apart};
 use solidcraft_kernel::{self as kernel, Body, BoolOp};
-use solidcraft_sketch::{CurveKind, Profile, SolveReport, find_profiles};
+use solidcraft_sketch::{CurveIdx, CurveKind, Profile, SolveReport, find_profiles};
 
 use crate::expr::{self, Kind, Value};
 use crate::lineage::Traced;
@@ -6499,7 +6499,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     // Each curve's exact segments (lines and arcs split by their own plane and cylinder).
                     let curves: Vec<Vec<solidcraft_geom::Seg2>> = (0..ss.sketch.curves.len())
                         .filter(|ci| ss.sketch.curves.get(*ci).is_some_and(|c| !c.construction))
-                        .map(|ci| ss.sketch.segs(solidcraft_sketch::CurveIdx(ci)))
+                        .map(|ci| ss.sketch.segs(CurveIdx(ci)))
                         .filter(|segs| !segs.is_empty())
                         .collect();
                     if curves.is_empty() {

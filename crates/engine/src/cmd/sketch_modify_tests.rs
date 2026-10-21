@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, CurveIdx, CurveKind};
+use solidcraft_sketch::{ConstraintKind, CurveIdx, CurveKind, PointIdx};
 
 use crate::Session;
 
@@ -364,8 +364,8 @@ fn a_tangent_arc_starts_from_a_trimmed_end() {
     let r = run(&mut s, "sketch.arc.tangent", json!({"start": "guide_a.end", "end": [14, 6]}));
     let sk = sketch(&s);
     let a = sk.curve_index(&ids(&r["curves"])[0]).unwrap();
-    let a_ends: Vec<solidcraft_sketch::PointIdx> = sk.curves[a].kind.point_ids();
-    let t_ends: Vec<solidcraft_sketch::PointIdx> = sk.curves[trimmed].kind.point_ids();
+    let a_ends: Vec<PointIdx> = sk.curves[a].kind.point_ids();
+    let t_ends: Vec<PointIdx> = sk.curves[trimmed].kind.point_ids();
     assert!(a_ends.iter().any(|q| t_ends.contains(q) && *q != picked), "the new arc shares the trimmed arc's own end");
     assert!(
         sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Tangent { a: x, b: y } if (x, y) == (trimmed, a) || (x, y) == (a, trimmed))),
