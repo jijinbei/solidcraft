@@ -1941,7 +1941,7 @@ fn equal_curves(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`curves` must list 2 to 200 lines or circles/arcs"));
     }
     let (out, info) = edit(s, p, cmd, true, |sk, _| {
-        let mut curves: Vec<usize> = Vec::with_capacity(ids.len());
+        let mut curves: Vec<CurveIdx> = Vec::with_capacity(ids.len());
         for id in &ids {
             let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
             if curves.contains(&c) {
