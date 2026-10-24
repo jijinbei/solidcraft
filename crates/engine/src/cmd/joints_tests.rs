@@ -1970,6 +1970,32 @@ fn joint_inspect_splits_an_edge_of_a_blend_face_into_its_two_faces() {
     assert!(!faces[1].contains('|'), "{edge}");
 }
 
+/// A joint on a pattern's copy of a pin: the copy's wall (`F3:side:c1@F4.1`) still names the
+/// sketch curve it was swept from, `c1`.
+#[test]
+fn joint_inspect_finds_the_sketch_curve_of_a_copied_side() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Pins"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PinSketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5, "id": "c1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 20, "name": "Pin"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Pin"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Cap"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [200, 0, 0]}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "name": "OnCopy", "a": {"occurrence": "Pins", "circle": [35, 0, 20]}, "b": {"occurrence": "Cap", "face": [205, 5, 5]}}),
+    );
+    let j = run(&mut s, "joint.inspect", json!({"joint": "OnCopy"}))["joints"][0].clone();
+    let wall = reference(&j, "a", "face");
+    assert!(wall["name"].as_str().is_some_and(|n| n.contains(":side:c1@F")), "a copy's wall: {j}");
+    assert_eq!((&wall["sketch"]["curve"], &wall["sketch"]["name"]), (&json!("c1"), &json!("PinSketch")), "{j}");
+    assert!(wall["sketch"]["error"].is_null(), "{j}");
+}
+
 /// `joint.inspect` reads only: no undo step, the design unchanged, and the id agents' gates
 /// treat as reading (`*.inspect`).
 #[test]
