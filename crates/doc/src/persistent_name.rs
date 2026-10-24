@@ -10,7 +10,7 @@
 //! The text form, read by [`FaceName::parse`] and [`EdgeName::parse`] and written by `Display`:
 //!
 //! ```text
-//! edge     = face "|" face [TIE]
+//! edge     = face { "|" face } [TIE]       one face for an open boundary, more where several meet
 //! face     = base { suffix }
 //! base     = FEATURE ":" "blend" ":" ( edge | NUMBER )
 //!          | FEATURE ":" "inner" ":" face
@@ -38,7 +38,9 @@
 use std::fmt;
 
 /// The longest name read.
-pub const MAX_NAME_LEN: usize = 4096;
+/// The longest name read. Names of pieces list their neighbours and grow with every split: a face
+/// engraved with text passes 4 KiB.
+pub const MAX_NAME_LEN: usize = 1 << 20;
 /// The deepest nesting read (blends of blends, pieces of pieces).
 const MAX_DEPTH: usize = 32;
 
@@ -134,7 +136,9 @@ pub struct Qualifier {
 /// A persistent edge name.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EdgeName {
-    pub faces: [FaceName; 2],
+    /// The faces it separates, in order: two, one for an open boundary, more where several
+    /// faces meet.
+    pub faces: Vec<FaceName>,
     pub tie: Option<u32>,
 }
 
@@ -200,7 +204,7 @@ impl EdgeName {
             }
             _ => None,
         };
-        let e = p.edge(0)?;
+        let e = p.edge(0, usize::MAX)?;
         p.end()?;
         Ok(EdgeName { tie, ..e })
     }
@@ -305,8 +309,12 @@ impl fmt::Display for FaceName {
 
 impl fmt::Display for EdgeName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [a, b] = &self.faces;
-        write!(f, "{a}|{b}")?;
+        for (i, face) in self.faces.iter().enumerate() {
+            if i > 0 {
+                f.write_str("|")?;
+            }
+            write!(f, "{face}")?;
+        }
         match self.tie {
             Some(k) => write!(f, "~{k}"),
             None => Ok(()),
@@ -339,13 +347,16 @@ fn later_suffixes(feature: FeatureId, inner: &mut FaceName) -> Vec<Suffix> {
     inner.suffixes.split_off(keep)
 }
 
-/// The feature whose `F<n>:` starts the face name `name` (a copy's is its source's): typed when
-/// the name reads, else the leading token as written.
+/// The feature whose `F<n>:` starts the face name `name` (a copy's is its source's). Every name a
+/// feature made starts so (`F2:top`, `F5:blend:…`, `F3:inner:…`), so only that token is read:
+/// cheap enough to ask of every face each frame.
 pub fn made_by(name: &str) -> Option<u64> {
-    match FaceName::parse(name) {
-        Ok(f) => f.made_by().map(|id| id.0),
-        Err(_) => name.strip_prefix('F').and_then(|r| r.split_once(':')).and_then(|(id, _)| id.parse().ok()),
+    let rest = name.strip_prefix('F')?;
+    let end = rest.find(|c: char| !c.is_ascii_digit())?;
+    if rest.get(end..end + 1) != Some(":") {
+        return None;
     }
+    number(rest.get(..end)?)
 }
 
 /// `name` without the `F<n>:` of the feature that made it, and `n`.
@@ -497,8 +508,8 @@ impl EdgeName {
         f: &mut impl FnMut(FeatureId, Place) -> Option<FeatureId>,
         body: &mut impl FnMut(&str) -> Option<String>,
     ) -> Option<EdgeName> {
-        let [a, b] = &self.faces;
-        Some(EdgeName { faces: [a.map_in(place, f, body)?, b.map_in(place, f, body)?], tie: self.tie })
+        let faces = self.faces.iter().map(|x| x.map_in(place, f, body)).collect::<Option<Vec<_>>>()?;
+        Some(EdgeName { faces, tie: self.tie })
     }
 }
 
@@ -633,13 +644,13 @@ impl<'a> Parser<'a> {
         self.word(0) == Some(w) && self.peek(1).is_some_and(|t| t.kind == Kind::Colon)
     }
 
-    fn edge(&mut self, depth: usize) -> Result<EdgeName, NameError> {
-        let a = self.face(depth + 1)?;
-        if self.peek(0).map(|t| t.kind) != Some(Kind::Pipe) {
-            return self.expected("`|` between an edge's two faces");
+    /// An edge: its faces joined by `|`, at most `max` of them.
+    fn edge(&mut self, depth: usize, max: usize) -> Result<EdgeName, NameError> {
+        let mut faces = vec![self.face(depth + 1)?];
+        while faces.len() < max && self.peek(0).map(|t| t.kind) == Some(Kind::Pipe) {
+            self.at += 1;
+            faces.push(self.face(depth + 1)?);
         }
-        self.at += 1;
-        let b = self.face(depth + 1)?;
         let tie = match self.peek(0).map(|t| t.kind) {
             Some(Kind::Tie(k)) => {
                 self.at += 1;
@@ -647,7 +658,7 @@ impl<'a> Parser<'a> {
             }
             _ => None,
         };
-        Ok(EdgeName { faces: [a, b], tie })
+        Ok(EdgeName { faces, tie })
     }
 
     fn face(&mut self, depth: usize) -> Result<FaceName, NameError> {
@@ -694,9 +705,9 @@ impl<'a> Parser<'a> {
             self.at += 1;
             return Ok(FaceName { base: Base::Blend { feature, rounds: Rounds::Index(k) }, suffixes: Vec::new() });
         }
-        let mut edge = self.edge(depth + 1)?;
-        let [_, b] = &mut edge.faces;
-        let moved = later_suffixes(feature, b);
+        // A blend names the edge it rounds by its faces, two at most: the rest is the outer edge's.
+        let mut edge = self.edge(depth + 1, 2)?;
+        let moved = edge.faces.last_mut().map(|b| later_suffixes(feature, b)).unwrap_or_default();
         Ok(FaceName { base: Base::Blend { feature, rounds: Rounds::Edge(Box::new(edge)) }, suffixes: moved })
     }
 
@@ -937,7 +948,7 @@ mod tests {
 
     #[test]
     fn errors_say_where() {
-        assert_eq!(EdgeName::parse("F2:top"), Err(NameError::Expected { at: 6, what: "`|` between an edge's two faces" }));
+        assert_eq!(EdgeName::parse("F2:top|"), Err(NameError::Expected { at: 7, what: "a face" }));
         assert_eq!(FaceName::parse("F2:top#[F3:x"), Err(NameError::Expected { at: 12, what: "`,` or `]` in a piece's faces" }));
         assert_eq!(FaceName::parse("a|b"), Err(NameError::Expected { at: 1, what: "the end of the name" }));
         assert_eq!(FaceName::parse(""), Err(NameError::Expected { at: 0, what: "a face" }));
@@ -945,7 +956,7 @@ mod tests {
 
     #[test]
     fn hostile_names_never_panic() {
-        let long = "F1:".repeat(MAX_NAME_LEN);
+        let long = "x".repeat(MAX_NAME_LEN + 1);
         let deep = format!("{}x", "F1:inner:".repeat(64));
         let deep_pieces = format!("x{}{}", "#[x".repeat(64), "]".repeat(64));
         for s in [
@@ -988,6 +999,13 @@ mod tests {
         assert_eq!(FaceName::parse(&long), Err(NameError::TooLong));
         assert_eq!(FaceName::parse(&deep), Err(NameError::TooDeep));
         assert_eq!(FaceName::parse(&deep_pieces), Err(NameError::TooDeep));
-        assert!(EdgeName::parse("x|y|z").is_err());
+        // An open boundary's edge has one face; an edge three faces meet at, three.
+        assert_eq!(edge("F2:top").faces.len(), 1);
+        assert_eq!(edge("x|y|z").faces.len(), 3);
+        // A blend's edge has two faces at most; a third is the outer edge's.
+        let e = edge("F5:blend:a|b|c");
+        assert!(matches!(&e.faces[0].base, Base::Blend { rounds: Rounds::Edge(inner), .. } if inner.faces.len() == 2) && e.faces.len() == 2);
+        // A fillet on an open boundary's edge.
+        assert!(matches!(face("F1:blend:F10:start").base, Base::Blend { rounds: Rounds::Edge(ref e), .. } if e.faces.len() == 1));
     }
 }
