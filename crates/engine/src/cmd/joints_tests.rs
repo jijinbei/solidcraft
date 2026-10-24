@@ -1937,6 +1937,39 @@ fn joint_inspect_reports_a_lost_origin() {
     assert_eq!(hinge["a"]["resolves"], true);
 }
 
+/// An edge whose first face is a fillet's: the fillet face's name holds the edge it rounds
+/// (`F2:blend:<face>|<face>`), so the edge's two faces are the whole blend name and the slot's
+/// wall, not the blend name cut at its own `|`.
+#[test]
+fn joint_inspect_splits_an_edge_of_a_blend_face_into_its_two_faces() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 20, 10]], "radius": 3}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 4, "height": 20, "corner": [32, 18, -5], "operation": "cut"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Cap"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [200, 0, 0]}));
+    // On the slot's wall y = 18, halfway round the fillet (axis x = 37, z = 7, r = 3).
+    let h = 3.0 * std::f64::consts::FRAC_1_SQRT_2;
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "OnBlend", "a": {"occurrence": "Base", "edge": [37.0 + h, 18, 7.0 + h]},
+               "b": {"occurrence": "Cap", "face": [205, 5, 5]}}),
+    );
+    let j = run(&mut s, "joint.inspect", json!({"joint": "OnBlend"}))["joints"][0].clone();
+    let edge = reference(&j, "a", "edge");
+    let name = edge["name"].as_str().unwrap_or_default().to_string();
+    let faces: Vec<String> = edge["faces"].as_array().into_iter().flatten().filter_map(|f| f["name"].as_str().map(str::to_string)).collect();
+    // `F4:blend:F3:+x|F3:+z#[F3:-y,F5:-y]|F5:-y`: the blend piece beside the slot, and the slot's wall.
+    assert!(name.split_once(':').is_some_and(|(_, r)| r.starts_with("blend:")), "the blend face comes first: {name}");
+    assert_eq!(faces.len(), 2, "{edge}");
+    assert_eq!(format!("{}|{}", faces[0], faces[1]), name, "{edge}");
+    assert!(faces[0].contains(":blend:") && faces[0].contains('|'), "{edge}");
+    assert!(!faces[1].contains('|'), "{edge}");
+}
+
 /// `joint.inspect` reads only: no undo step, the design unchanged, and the id agents' gates
 /// treat as reading (`*.inspect`).
 #[test]
