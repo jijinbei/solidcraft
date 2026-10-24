@@ -21,11 +21,16 @@
 //! HASH     = "#" NUMBER        TIE  = "~" NUMBER
 //! ```
 //!
-//! Suffixes after a blend's edge are ambiguous in the text: in `F5:blend:A|B#[…]` the qualifier
+//! Suffixes after a nested name are ambiguous in the text: in `F5:blend:A|B#[…]` the qualifier
 //! may split `B` (the fillet rounds an edge of a piece made before it) or the fillet face itself
-//! (a later cut split it). A suffix naming a feature later than the blend belongs to the blend
-//! face; any other stays on `B`, so a later cut told apart only by older faces reads as a piece
-//! of `B`. A `~k` ending an edge numbers that edge, not a blend's edge inside it.
+//! (a later cut split it), and so for a shell's inner wall `F3:inner:X#[…]`. A suffix naming a
+//! feature later than the outer face's belongs to the outer face; any other stays inside, so a
+//! later cut told apart only by older faces reads as a piece of the inner name. A `~k` ending an
+//! edge numbers that edge, not a blend's edge inside it.
+//!
+//! Finding a face by name still goes through `naming::strip_piece` and `parent_piece`, which
+//! read a trailing qualifier as the whole name's; they move here once the text form says where a
+//! qualifier belongs.
 //!
 //! Reading is bounded in length and depth and never panics; whatever it reads writes back as the
 //! same text.
@@ -321,6 +326,182 @@ impl fmt::Display for NameError {
 
 impl std::error::Error for NameError {}
 
+/// The trailing suffixes of `inner`, the last name nested in a face of `feature`, that name a
+/// later feature, taken off it: they are the outer face's (a later cut split it, a later pattern
+/// copied it).
+fn later_suffixes(feature: FeatureId, inner: &mut FaceName) -> Vec<Suffix> {
+    let later = |s: &Suffix| match s {
+        Suffix::Copy { feature: f, .. } => *f > feature,
+        Suffix::Piece(q) => q.around.iter().filter_map(FaceName::feature).max().is_some_and(|f| f > feature),
+        Suffix::Numbered(_) => false,
+    };
+    let keep = inner.suffixes.iter().rposition(|s| !later(s)).map_or(0, |i| i + 1);
+    inner.suffixes.split_off(keep)
+}
+
+/// The feature whose `F<n>:` starts the face name `name` (a copy's is its source's): typed when
+/// the name reads, else the leading token as written.
+pub fn made_by(name: &str) -> Option<u64> {
+    match FaceName::parse(name) {
+        Ok(f) => f.made_by().map(|id| id.0),
+        Err(_) => name.strip_prefix('F').and_then(|r| r.split_once(':')).and_then(|(id, _)| id.parse().ok()),
+    }
+}
+
+/// `name` without the `F<n>:` of the feature that made it, and `n`.
+pub fn split_feature(name: &str) -> Option<(u64, &str)> {
+    let id = made_by(name)?;
+    Some((id, name.strip_prefix(&format!("F{id}:"))?))
+}
+
+/// Whether `name` is a pattern's or mirror's copy of a face.
+pub fn is_copy(name: &str) -> bool {
+    FaceName::parse(name).map_or_else(|_| name.contains('@'), |f| f.is_copy())
+}
+
+/// Whether `name` is a fillet's or chamfer's face.
+pub fn is_blend(name: &str) -> bool {
+    FaceName::parse(name).map_or_else(|_| name.contains(":blend:"), |f| f.is_blend())
+}
+
+/// Whether `name` is a piece told apart by a number (an older design's piece, or a tie).
+pub fn is_numbered_piece(name: &str) -> bool {
+    FaceName::parse(name).map_or_else(
+        |_| name.match_indices('#').any(|(i, _)| name.get(i + 1..).is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))),
+        |f| f.is_numbered_piece(),
+    )
+}
+
+/// Whether `name` is a whole `side` face: a cylinder's wall, or a tool's faces swept from its
+/// whole profile.
+pub fn is_wall(name: &str) -> bool {
+    FaceName::parse(name).map_or_else(|_| name.ends_with(":side"), |f| f.suffixes.is_empty() && matches!(f.base, Base::Made { role: Role::Wall, .. }))
+}
+
+/// `name` with every feature id `ids` maps replaced, the rest kept; `None` when it doesn't read.
+pub fn map_features(name: &str, ids: &std::collections::BTreeMap<u64, u64>) -> Option<String> {
+    let f = FaceName::parse(name).ok()?;
+    let mapped = f.map(&mut |id, _| Some(ids.get(&id.0).map_or(id, |n| FeatureId(*n))), &mut |_| None)?;
+    Some(mapped.to_string())
+}
+
+/// Where a feature id sits in a name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    /// It names what made a face: a base, a nested face's base, a copy.
+    Name,
+    /// It names a face around a piece (`#[…]`).
+    Qualifier,
+}
+
+impl FaceName {
+    /// The feature whose `F<n>:` starts the name.
+    pub fn made_by(&self) -> Option<FeatureId> {
+        match &self.base {
+            Base::Made { feature, .. } | Base::Blend { feature, .. } | Base::Inner { feature, .. } => Some(*feature),
+            Base::BodyFace { .. } | Base::Other(_) => None,
+        }
+    }
+
+    /// Every feature id in the name, in the order the text gives them.
+    pub fn features(&self) -> Vec<FeatureId> {
+        let mut out = Vec::new();
+        self.push_features(&mut out);
+        out
+    }
+
+    fn push_features(&self, out: &mut Vec<FeatureId>) {
+        match &self.base {
+            Base::Made { feature, .. } | Base::Blend { feature, rounds: Rounds::Index(_) } => out.push(*feature),
+            Base::Blend { feature, rounds: Rounds::Edge(e) } => {
+                out.push(*feature);
+                e.faces.iter().for_each(|f| f.push_features(out));
+            }
+            Base::Inner { feature, offsets } => {
+                out.push(*feature);
+                offsets.push_features(out);
+            }
+            Base::BodyFace { .. } | Base::Other(_) => {}
+        }
+        for s in &self.suffixes {
+            match s {
+                Suffix::Copy { feature, .. } => out.push(*feature),
+                Suffix::Piece(q) => q.around.iter().for_each(|f| f.push_features(out)),
+                Suffix::Numbered(_) => {}
+            }
+        }
+    }
+
+    /// A fillet's or chamfer's face (a piece or copy of one too).
+    pub fn is_blend(&self) -> bool {
+        matches!(self.base, Base::Blend { .. })
+    }
+
+    /// A pattern's or mirror's copy of a face (a piece of one too).
+    pub fn is_copy(&self) -> bool {
+        self.suffixes.iter().any(|s| matches!(s, Suffix::Copy { .. }))
+    }
+
+    /// A piece told apart by a number: an older design's numbered piece, or a tie.
+    pub fn is_numbered_piece(&self) -> bool {
+        self.suffixes.iter().any(|s| matches!(s, Suffix::Numbered(_) | Suffix::Piece(Qualifier { tie: Some(_), .. })))
+    }
+
+    /// The name with each feature id mapped by `f` (given where it sits) and each body face's
+    /// body by `body`; `None` when `f` refuses one. A role's text is left as written.
+    pub fn map(&self, f: &mut impl FnMut(FeatureId, Place) -> Option<FeatureId>, body: &mut impl FnMut(&str) -> Option<String>) -> Option<FaceName> {
+        self.map_in(Place::Name, f, body)
+    }
+
+    fn map_in(
+        &self,
+        place: Place,
+        f: &mut impl FnMut(FeatureId, Place) -> Option<FeatureId>,
+        body: &mut impl FnMut(&str) -> Option<String>,
+    ) -> Option<FaceName> {
+        let base = match &self.base {
+            Base::Made { feature, role } => Base::Made { feature: f(*feature, place)?, role: role.clone() },
+            Base::Blend { feature, rounds } => {
+                let rounds = match rounds {
+                    Rounds::Edge(e) => Rounds::Edge(Box::new(e.map_in(place, f, body)?)),
+                    Rounds::Index(k) => Rounds::Index(*k),
+                };
+                Base::Blend { feature: f(*feature, place)?, rounds }
+            }
+            Base::Inner { feature, offsets } => {
+                let offsets = Box::new(offsets.map_in(place, f, body)?);
+                Base::Inner { feature: f(*feature, place)?, offsets }
+            }
+            Base::BodyFace { body: b, index } => Base::BodyFace { body: body(b).unwrap_or_else(|| b.clone()), index: *index },
+            Base::Other(t) => Base::Other(t.clone()),
+        };
+        let mut suffixes = Vec::with_capacity(self.suffixes.len());
+        for s in &self.suffixes {
+            suffixes.push(match s {
+                Suffix::Copy { feature, instance } => Suffix::Copy { feature: f(*feature, place)?, instance: *instance },
+                Suffix::Piece(q) => {
+                    let around = q.around.iter().map(|a| a.map_in(Place::Qualifier, f, body)).collect::<Option<Vec<_>>>()?;
+                    Suffix::Piece(Qualifier { around, tie: q.tie })
+                }
+                Suffix::Numbered(k) => Suffix::Numbered(*k),
+            });
+        }
+        Some(FaceName { base, suffixes })
+    }
+}
+
+impl EdgeName {
+    fn map_in(
+        &self,
+        place: Place,
+        f: &mut impl FnMut(FeatureId, Place) -> Option<FeatureId>,
+        body: &mut impl FnMut(&str) -> Option<String>,
+    ) -> Option<EdgeName> {
+        let [a, b] = &self.faces;
+        Some(EdgeName { faces: [a.map_in(place, f, body)?, b.map_in(place, f, body)?], tie: self.tie })
+    }
+}
+
 /// A plain decimal number: digits only, no leading zero (so it writes back the same).
 fn number<T: std::str::FromStr>(d: &str) -> Option<T> {
     let ok = !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit()) && (d.len() == 1 || !d.starts_with('0'));
@@ -482,8 +663,9 @@ impl<'a> Parser<'a> {
                     self.blend(feature, depth)?
                 } else if self.keyword("inner") {
                     self.at += 2;
-                    let offsets = Box::new(self.face(depth + 1)?);
-                    FaceName { base: Base::Inner { feature, offsets }, suffixes: Vec::new() }
+                    let mut offsets = self.face(depth + 1)?;
+                    let moved = later_suffixes(feature, &mut offsets);
+                    FaceName { base: Base::Inner { feature, offsets: Box::new(offsets) }, suffixes: moved }
                 } else {
                     let role = Role::from_text(self.text()?);
                     FaceName { base: Base::Made { feature, role }, suffixes: Vec::new() }
@@ -513,16 +695,8 @@ impl<'a> Parser<'a> {
             return Ok(FaceName { base: Base::Blend { feature, rounds: Rounds::Index(k) }, suffixes: Vec::new() });
         }
         let mut edge = self.edge(depth + 1)?;
-        // The trailing suffixes of the edge's second face that name a later feature are the
-        // blend face's: a later cut split it, or a later pattern copied it.
-        let later = |s: &Suffix| match s {
-            Suffix::Copy { feature: f, .. } => *f > feature,
-            Suffix::Piece(q) => q.around.iter().filter_map(FaceName::feature).max().is_some_and(|f| f > feature),
-            Suffix::Numbered(_) => false,
-        };
         let [_, b] = &mut edge.faces;
-        let keep = b.suffixes.iter().rposition(|s| !later(s)).map_or(0, |i| i + 1);
-        let moved = b.suffixes.split_off(keep);
+        let moved = later_suffixes(feature, b);
         Ok(FaceName { base: Base::Blend { feature, rounds: Rounds::Edge(Box::new(edge)) }, suffixes: moved })
     }
 
@@ -703,6 +877,62 @@ mod tests {
         let f = face("F3:inner:F2:top#[F2:side:l2]");
         let Base::Inner { feature: FeatureId(3), offsets } = &f.base else { panic!("{f:?}") };
         assert_eq!(offsets.stem(), made(2, Role::Top));
+    }
+
+    #[test]
+    fn what_made_a_face_and_its_kind() {
+        assert_eq!(made_by("F2:side:l1@F7.2"), Some(2));
+        assert_eq!(made_by("F3:inner:F5:blend:a|b"), Some(3));
+        assert_eq!(made_by("Body1:face:3"), None);
+        assert_eq!(split_feature("F12:boss:side:3"), Some((12, "boss:side:3")));
+        // A blend named only inside another name is not one.
+        assert!(is_blend("F5:blend:F2:x|F2:y#[F6:z]"));
+        assert!(!is_blend("F2:top#[F5:blend:a|b]"));
+        assert!(!is_blend("F3:inner:F5:blend:a|b"));
+        // A copy only inside a blend's edge doesn't make the blend face a copy.
+        assert!(is_copy("F2:side:l1@F7.2#[F8:x]"));
+        assert!(!is_copy("F5:blend:F2:x@F3.1|F2:y"));
+        assert!(is_numbered_piece("F2:top#2") && is_numbered_piece("F2:top#[F4:x]#1"));
+        assert!(!is_numbered_piece("F5:blend:F2:top#2|F2:x") && !is_numbered_piece("F2:top#[F4:x]"));
+        assert!(is_wall("F4:side") && !is_wall("F4:side#1") && !is_wall("F5:blend:F2:x|F4:side"));
+    }
+
+    /// A shell's inner wall split by a later cut: the qualifier, naming the cut, is the wall's.
+    #[test]
+    fn an_inner_wall_split_by_a_later_cut_takes_the_qualifier() {
+        let f = face("F3:inner:F2:top#[F2:side:l2,F6:x]");
+        assert!(matches!(f.suffixes.as_slice(), [Suffix::Piece(_)]));
+        assert_eq!(f.stem().to_string(), "F3:inner:F2:top");
+    }
+
+    #[test]
+    fn features_in_text_order() {
+        let ids = |s: &str| face(s).features().into_iter().map(|f| f.0).collect::<Vec<_>>();
+        assert_eq!(ids("F3:inner:F2:blend:F1:+y|F1:-x"), vec![3, 2, 1, 1]);
+        assert_eq!(ids("F82:-z@F84.2"), vec![82, 84]);
+        assert_eq!(ids("F2:top#[F2:side:l2,F4:side:l2]"), vec![2, 2, 4]);
+        assert_eq!(ids("F1:side:曲線F10"), vec![1]);
+        assert!(ids("Body1:face:3").is_empty());
+    }
+
+    #[test]
+    fn feature_ids_map_everywhere_but_role_text() {
+        let ids = std::collections::BTreeMap::from([(2, 12), (5, 15)]);
+        let mapped = map_features("F5:blend:F2:side:l2|F2:top#[F2:side:l2,F4:side:l2]@F2.1", &ids);
+        assert_eq!(mapped.as_deref(), Some("F15:blend:F12:side:l2|F12:top#[F12:side:l2,F4:side:l2]@F12.1"));
+        // Where an id sits: a name's ids must map, a qualifier's may stay.
+        let f = face("F2:top#[F9:x]");
+        let strict = f.map(
+            &mut |id, place| match place {
+                Place::Name => ids.get(&id.0).map(|n| FeatureId(*n)),
+                Place::Qualifier => Some(ids.get(&id.0).map_or(id, |n| FeatureId(*n))),
+            },
+            &mut |_| None,
+        );
+        assert_eq!(strict.map(|f| f.to_string()).as_deref(), Some("F12:top#[F9:x]"));
+        assert!(face("F9:top").map(&mut |id, _| ids.get(&id.0).map(|n| FeatureId(*n)), &mut |_| None).is_none());
+        let body = face("Body1:face:3").map(&mut |id, _| Some(id), &mut |b| (b == "Body1").then(|| "Body2".to_string()));
+        assert_eq!(body.map(|f| f.to_string()).as_deref(), Some("Body2:face:3"));
     }
 
     #[test]
