@@ -112,7 +112,7 @@ pub fn tangent(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference>
 /// stops before reaching it, is left alone.
 pub fn through_center(sk: &Sketch, prev: Vec2, lp: Vec2, tol: f64) -> Option<Inference> {
     let mut best: Option<Inference> = None;
-    for (i, c) in sk.curves.iter().enumerate() {
+    for (i, c) in sk.curves.iter_enumerated() {
         if !matches!(c.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }) {
             continue;
         }
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn a_construction_circle_still_snaps_and_the_nearer_centre_wins() {
         let mut s = circle();
-        s.curves[0].construction = true;
+        s.curves[CurveIdx(0)].construction = true;
         let i = through_center(&s, Vec2::new(-10.0, 0.0), Vec2::new(9.8, 0.2), 0.5).expect("construction");
         assert!(i.at.dist(Vec2::new(10.0, 0.0)) < 1e-9);
         let _ = s.add_circle(Vec2::new(0.0, 40.0), 10.0, None, Some("c2"));

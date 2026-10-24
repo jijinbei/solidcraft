@@ -696,10 +696,10 @@ fn centre_circle_clicked_through_a_line_end_stays_on_it() {
         h.step(&json!({"click":{"world":at}})).unwrap();
     }
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
-    let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).unwrap();
+    let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).map(CurveIdx).unwrap();
     let end = sk.resolve_point("l1.end").unwrap();
     assert!(
-        sk.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Midpoint { l: 0, .. })),
+        sk.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::Midpoint { l: CurveIdx(0), .. })),
         "{:?}",
         sk.constraints
     );

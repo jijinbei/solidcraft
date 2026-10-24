@@ -1232,7 +1232,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
     // The point of each MidPoint glyph drawn so far: lines whose midpoints meet share one glyph.
-    let mut midpoints: Vec<usize> = Vec::new();
+    let mut midpoints: Vec<solidcraft_engine::sketch::PointIdx> = Vec::new();
     for c in &ss.sketch.constraints {
         if c.kind.is_dimension() {
             continue;

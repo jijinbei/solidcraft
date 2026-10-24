@@ -350,7 +350,7 @@ pub fn trim_piece(sk: &Sketch, curve: &str, at: Vec2) -> Option<Vec<Vec2>> {
 /// Trim and extend refuse an offset's output: its ends are recomputed from its source curves on
 /// every solve, so a new end there would be pulled straight back (the trim reported success and
 /// left the curve whole).
-fn refuse_offset_ends(sk: &Sketch, ci: usize, what: &str, cmd: &str) -> Result<()> {
+fn refuse_offset_ends(sk: &Sketch, ci: CurveIdx, what: &str, cmd: &str) -> Result<()> {
     match sk.curves.get(ci).filter(|c| sk.offset_distance(&c.id).is_some()) {
         Some(c) => Err(bad(
             cmd,
@@ -766,9 +766,9 @@ fn refuse_infinite_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
 /// recomputed from its source curves on every solve, so a corner cut there would be pulled back
 /// to the sharp corner, leaving full circles and an unsolved sketch.
 fn refuse_offset_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
-    let output = |c: usize| sk.curves.get(c).filter(|c| sk.offset_distance(&c.id).is_some()).map(|c| c.id.clone());
+    let output = |c: CurveIdx| sk.curves.get(c).filter(|c| sk.offset_distance(&c.id).is_some()).map(|c| c.id.clone());
     let found = match str_(p, "point").and_then(|r| sk.resolve_point(r)) {
-        Some(q) => (0..sk.curves.len()).filter(|c| sk.curves.get(*c).is_some_and(|x| x.kind.uses(q))).find_map(output),
+        Some(q) => sk.curves.iter_enumerated().filter(|(_, x)| x.kind.uses(q)).find_map(|(c, _)| output(c)),
         None => ["a", "b"].iter().find_map(|k| str_(p, k).and_then(|i| sk.curve_index(i)).and_then(output)),
     };
     match found {
@@ -893,7 +893,7 @@ fn keep_corner(sk: &mut Sketch, c: PointIdx, [(ca, na), (cb, nb)]: [(CurveIdx, P
         k.kind = if *a == new_end { ConstraintKind::Distance { p: c, q: *b, value } } else { ConstraintKind::Distance { p: *a, q: c, value } };
         moved.push(k.id.clone());
     }
-    let positioned = sk.spoint(c).is_some_and(|pt| pt.fixed || pt.exprs.is_some());
+    let positioned = sk.points.get(c).is_some_and(|pt| pt.fixed || pt.exprs.is_some());
     if moved.is_empty() && !used && c != PointIdx::ORIGIN && !positioned {
         return Ok(None);
     }

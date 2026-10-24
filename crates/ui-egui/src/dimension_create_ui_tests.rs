@@ -832,7 +832,7 @@ fn midpoint_then_edge_creates_a_distance_in_one_undo_step() {
         let (_, c, sk) = crate::dim_view::draft_preview().unwrap();
         let ConstraintKind::PointLineDistance { p, l, .. } = c.kind else { panic!("MID to edge must be a distance: {:?}", c.kind) };
         assert_eq!(sk.curves[l].id, "l2");
-        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { p: q, l: 0 } if q == p)));
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { p: q, l: CurveIdx(0) } if q == p)));
         assert_eq!(h.app.session.doc.to_json(), baseline, "preview creates no persistent helper");
         if !accept {
             h.step(&json!({"key":"Escape"})).unwrap();
@@ -1008,8 +1008,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
                 let bottom = ss
                     .sketch
                     .curves
-                    .iter()
-                    .enumerate()
+                    .iter_enumerated()
                     .find_map(|(i, c)| {
                         c.link.as_ref()?;
                         let solidcraft_engine::sketch::Shape::Line { a, b } = ss.sketch.shape(i)? else {
@@ -1029,8 +1028,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
                 let mid_ref = |point: [f64; 2]| {
                     ss.sketch
                         .curves
-                        .iter()
-                        .enumerate()
+                        .iter_enumerated()
                         .find_map(|(i, c)| {
                             let solidcraft_engine::sketch::Shape::Line { a, b } = ss.sketch.shape(i)? else {
                                 return None;

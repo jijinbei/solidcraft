@@ -148,7 +148,7 @@ fn clicking_a_parameter_suggestion_fills_the_length_box() {
     let state = h.app.session.world_state();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 1);
-    let length = sk.shape(0).map(|s| match s {
+    let length = sk.shape(CurveIdx(0)).map(|s| match s {
         solidcraft_engine::sketch::Shape::Line { a, b } => a.dist(b),
         _ => 0.0,
     });
@@ -166,8 +166,8 @@ fn two_point_circle_takes_a_typed_diameter() {
     let state = h.app.session.world_state();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
-    assert!(sk.radius(0).is_some_and(|r| (r - 15.0).abs() < 1e-6), "{:?}", sk.radius(0));
-    let c = sk.center(0).unwrap();
+    assert!(sk.radius(CurveIdx(0)).is_some_and(|r| (r - 15.0).abs() < 1e-6), "{:?}", sk.radius(CurveIdx(0)));
+    let c = sk.center(CurveIdx(0)).unwrap();
     // From the first point (the origin) toward the cursor at (20, 10).
     let dir = solidcraft_engine::geom::Vec2::new(20.0, 10.0).normalized().unwrap();
     assert!((c - dir * 15.0).len() < 1e-6, "{c:?}");

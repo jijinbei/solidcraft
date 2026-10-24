@@ -1722,7 +1722,7 @@ pub(super) fn residual_of(sk: &Sketch, id: &str) -> Option<f64> {
 
 /// The point already tied to the middle of line `l`, including one created by drawing.
 /// Coincident coordinates alone are not enough: the Midpoint relationship must exist.
-fn existing_midpoint(sk: &Sketch, l: usize) -> Option<usize> {
+fn existing_midpoint(sk: &Sketch, l: CurveIdx) -> Option<PointIdx> {
     sk.constraints.iter().find_map(|c| match c.kind {
         ConstraintKind::Midpoint { p, l: line } if line == l && !c.driven => Some(p),
         _ => None,
@@ -1845,7 +1845,7 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// `a` and `b` both circles or arcs (two different ones).
-fn two_round(sk: &Sketch, p: &Value) -> Option<(usize, usize)> {
+fn two_round(sk: &Sketch, p: &Value) -> Option<(CurveIdx, CurveIdx)> {
     let round = |k: &str| {
         let c = sk.curve_index(p.get(k)?.as_str()?)?;
         matches!(sk.curves.get(c)?.kind, CurveKind::Circle { .. } | CurveKind::Arc { .. }).then_some(c)
@@ -1857,10 +1857,10 @@ fn two_round(sk: &Sketch, p: &Value) -> Option<(usize, usize)> {
 /// Two circles or arcs made coincident lie on each other: one centre and one radius (Concentric
 /// and Equal), the second pick moving onto the first, in one step. A half already there is
 /// not added again.
-fn coincident_circles(s: &mut Session, p: &Value, cmd: &str, a: usize, b: usize) -> Result<Value> {
+fn coincident_circles(s: &mut Session, p: &Value, cmd: &str, a: CurveIdx, b: CurveIdx) -> Result<Value> {
     let (ids, info) = edit(s, p, cmd, true, |sk, _| {
         let rep = solve(&mut sk.clone());
-        let pair = |x: usize, y: usize| (x, y) == (a, b) || (x, y) == (b, a);
+        let pair = |x: CurveIdx, y: CurveIdx| (x, y) == (a, b) || (x, y) == (b, a);
         let concentric = sk.constraints.iter().any(|c| !c.driven && matches!(c.kind, ConstraintKind::Concentric { a: x, b: y } if pair(x, y)));
         let equal = sk.constraints.iter().any(|c| !c.driven && matches!(c.kind, ConstraintKind::Equal { a: x, b: y } if pair(x, y)));
         let mut ids = Vec::new();
@@ -1996,7 +1996,7 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
                 None => sk.curve_index(r).map(Ent::Curve).ok_or_else(|| bad(cmd, format!("unknown sketch point or curve `{r}`"))),
             }
         };
-        let is_line = |sk: &Sketch, c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }));
+        let is_line = |sk: &Sketch, c: CurveIdx| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }));
         match (entity("a")?, entity("b")?) {
             (Ent::Point(q), Ent::Curve(l)) | (Ent::Curve(l), Ent::Point(q)) if is_line(sk, l) => Ok(ConstraintKind::Midpoint { p: q, l }),
             // Two lines: their midpoints meet. One point sits at the middle of both, reusing
@@ -2021,7 +2021,7 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Point `q` is already tied to the middle of line `l`.
-fn existing_midpoint_of(sk: &Sketch, q: usize, l: usize) -> bool {
+fn existing_midpoint_of(sk: &Sketch, q: PointIdx, l: CurveIdx) -> bool {
     sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { p, l: line } if p == q && line == l) && !c.driven)
 }
 
