@@ -206,8 +206,8 @@ fn face_ref(doc: &Document, name: &str) -> Value {
 fn edge_ref(doc: &Document, name: &str) -> Value {
     let bare = legacy_name(name).unwrap_or(name);
     let faces: Vec<Value> = match EdgeName::parse(bare) {
-        Some(e) => e.faces.iter().map(|f| face_ref(doc, &f.to_string())).collect(),
-        None => Vec::new(),
+        Ok(e) => e.faces.iter().map(|f| face_ref(doc, &f.to_string())).collect(),
+        Err(_) => Vec::new(),
     };
     let mut v = json!({"name": name, "faces": faces});
     if legacy_name(name).is_some() {
