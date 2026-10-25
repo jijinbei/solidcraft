@@ -7,12 +7,14 @@
 //! offsets. Nothing is sampled. Where a face's origin cannot be named exactly the face is named
 //! from geometry, as a body without history is, and marked unverified.
 //!
-//! Two faces with the same name are pieces of one face (a cut split it). Each piece is told apart
-//! by the faces around it that the others do not have: `F2:top#[F2:side:l4,F4:side:l4]` is the
-//! piece of `F2:top` bounded by the block's left wall and the slot's left wall. Pieces nothing
-//! around them tells apart are numbered (`#1`, `#2`): in the order of what they came from when
-//! that differs (exact), else in the kernel's order (unverified). A face made of several (a
-//! coplanar join) takes one name and answers to the others (aliases).
+//! Faces with the same stem are pieces of one face (a cut split it). Each piece is told apart by
+//! as few faces around it as tell it from the other pieces (#5860): `F2:top#[F4:side:l4]` is the
+//! piece of `F2:top` the slot's left wall bounds. A piece is named by the faces around it now, not
+//! by how it was split before, so a name does not grow with every split; a stored piece name
+//! finds the piece of the same face that those faces all still bound. Pieces nothing around them
+//! tells apart are numbered (`#1`, `#2`): in the order of what they came from when that differs
+//! (exact), else in the kernel's order (unverified). A face made of several (a coplanar join)
+//! takes one name and answers to the others (aliases).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
@@ -311,9 +313,12 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
             set.insert(sa.to_string());
         }
     }
+    // Pieces of one face, by its stem: pieces are named from the faces around them now, not from
+    // the names the pieces they came from had. The only piece of its face on this body keeps the
+    // name it came with (it tells it from a piece on another body, after a cut parted them).
     let mut groups: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
     for (i, x) in named.iter().enumerate() {
-        groups.entry(x.name.as_str()).or_default().push(i);
+        groups.entry(crate::naming::strip_piece(&x.name)).or_default().push(i);
     }
     let mut names: Vec<String> = named.iter().map(|x| x.name.clone()).collect();
     let mut verified: Vec<bool> = named.iter().map(|x| x.verified).collect();
@@ -332,8 +337,9 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
         let own = |i: usize| -> Vec<&String> { bounds.get(i).unwrap_or(&empty).iter().filter(|x| !common.contains(x)).collect() };
         let mut by_key: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         for &i in members {
-            let key: Vec<&str> = own(i).into_iter().map(String::as_str).collect();
-            // Nothing around it of its own: the piece is only numbered (below).
+            let rivals: Vec<&BTreeSet<String>> = members.iter().filter(|j| **j != i).map(|j| bounds.get(*j).unwrap_or(&empty)).collect();
+            let key = telling_apart(own(i), rivals);
+            // Nothing around it tells it apart: the piece is only numbered (below).
             let name = if key.is_empty() { base.to_string() } else { format!("{base}#[{}]", key.join(",")) };
             by_key.entry(name).or_default().push(i);
         }
@@ -394,6 +400,41 @@ fn qualify_at(named: Vec<Named>, adjacent: &[(usize, usize)], centres: Option<&d
     Names { faces: Arc::new(names), info }
 }
 
+/// The fewest of the faces around a piece (`own`) that tell it from the other pieces of its face
+/// (`rivals`: the faces around each), in sorted order: each next face is the one the most pieces
+/// not told apart yet lack, a face of an earlier feature first on a tie (later edits remove it
+/// less often). Stops when no face tells the rest apart: those are numbered afterwards.
+fn telling_apart<'a>(own: Vec<&'a String>, rivals: Vec<&BTreeSet<String>>) -> Vec<&'a str> {
+    let feature = |f: &str| f.strip_prefix('F').and_then(|r| r.split(':').next()).and_then(|id| id.parse::<u64>().ok()).unwrap_or(u64::MAX);
+    let mut left = rivals;
+    let mut chosen: Vec<&'a str> = Vec::new();
+    while !left.is_empty() {
+        let best = own
+            .iter()
+            .filter(|f| !chosen.contains(&f.as_str()))
+            .map(|f| (left.iter().filter(|r| !r.contains(*f)).count(), *f))
+            .filter(|(told, _)| *told > 0)
+            .max_by(|(ta, a), (tb, b)| ta.cmp(tb).then_with(|| (feature(b), b.len(), *b).cmp(&(feature(a), a.len(), *a))));
+        let Some((_, f)) = best else { break };
+        chosen.push(f.as_str());
+        left.retain(|r| r.contains(f));
+    }
+    chosen.sort_unstable();
+    chosen
+}
+
+/// Every face the qualifiers of the piece name `name` list, at any depth (none for a face that
+/// is no piece, or only a numbered one).
+fn qualifier_faces(name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = name;
+    while let Some((parent, around)) = crate::piece_names::piece_parts(current) {
+        out.extend(around.into_iter().map(str::to_string));
+        current = parent;
+    }
+    out
+}
+
 /// `origin` with the face or edge it names left out (its kind and operand kept).
 fn without_index(origin: FaceOrigin) -> FaceOrigin {
     match origin {
@@ -432,15 +473,16 @@ pub(crate) fn matches(names: &Names, index: usize, name: &str) -> Option<Match> 
     if descends(current, name) {
         return Some(Match::Piece);
     }
-    // The named piece, told apart by the faces around it: they still bound this piece.
-    if let Some((stem, around)) = crate::piece_names::piece_parts(name)
-        && crate::naming::parent_piece(current) == Some(stem)
-        && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f)))
-    {
+    // The named piece, told apart by the faces around it: they all still bound this piece of the
+    // same face, however it was split since. A face that is whole again is not the piece.
+    let root = crate::naming::strip_piece(name);
+    let same_face = crate::naming::strip_piece(current) == root;
+    let around = qualifier_faces(name);
+    let piece = crate::naming::parent_piece(current).is_some();
+    if same_face && piece && !around.is_empty() && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(f))) {
         return Some(Match::Piece);
     }
-    let root = crate::naming::strip_piece(name);
-    (crate::naming::strip_piece(current) == root).then_some(Match::Stem)
+    same_face.then_some(Match::Stem)
 }
 
 #[cfg(test)]

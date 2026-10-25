@@ -83,9 +83,10 @@ fn faces_built_from_a_profile_are_named_exactly() {
     let n = names(&s, "Body1");
     assert!(n.iter().all(|(_, exact)| *exact), "{n:?}");
     let has = |want: &str| n.iter().any(|(x, _)| x == want);
-    // The top is in two pieces, each told apart by the walls only it touches.
-    assert!(has(&format!("F{block}:top#[F{block}:side:l4,F{cut}:side:l4]")), "{n:?}");
-    assert!(has(&format!("F{block}:top#[F{block}:side:l2,F{cut}:side:l2]")), "{n:?}");
+    // The top is in two pieces, each told apart by a wall only it touches (the block's: the
+    // earlier feature's).
+    assert!(has(&format!("F{block}:top#[F{block}:side:l4]")), "{n:?}");
+    assert!(has(&format!("F{block}:top#[F{block}:side:l2]")), "{n:?}");
     // The slot's floor is its start cap (above the sketch plane), its walls its sketch curves.
     for want in [format!("F{cut}:top"), format!("F{cut}:side:l2"), format!("F{cut}:side:l4"), format!("F{block}:start")] {
         assert!(has(&want), "{want} in {n:?}");
@@ -120,11 +121,10 @@ fn a_piece_keeps_its_identity_when_the_cut_that_made_it_moves_or_shrinks() {
     block(&mut s);
     slot(&mut s, 5.0);
     let block = id(&s, "Block");
-    let cut = id(&s, "Slot");
     // Raise the piece right of the slot, picked near the slot.
     run(&mut s, "solid.offset_face", json!({"faces": [[27, 15, 10]], "distance": 2, "name": "Raise"}));
     let raise = s.doc.find_feature("Raise").cloned().unwrap();
-    assert_eq!(raise.face_names, vec![format!("F{block}:top#[F{block}:side:l2,F{cut}:side:l2]")]);
+    assert_eq!(raise.face_names, vec![format!("F{block}:top#[F{block}:side:l2]")]);
     assert!(solid_at(&s, [27.0, 15.0, 11.0]) && solid_at(&s, [39.0, 15.0, 11.0]) && !solid_at(&s, [10.0, 15.0, 11.0]));
     // The slot moves right past the picked point, which now lies on the other piece: the name,
     // not the point, says which piece was raised.
@@ -588,4 +588,31 @@ fn one_fillet_over_stacked_boxes_rounds_the_upper_box_s_edge_even_when_saved_nam
     feature.edge_refs = old_refs;
     s.refresh();
     check(&s, "saved by an older build");
+}
+
+/// #5860: ribs on a shelled box's floor split it again and again; a piece is named by as few
+/// faces around it as tell it apart, so the names don't grow with the ribs.
+#[test]
+fn names_of_split_faces_do_not_grow_with_every_split() {
+    let longest = |ribs: usize| {
+        let mut s = Session::default();
+        let size = 16.0 * ribs as f64 + 20.0;
+        run(&mut s, "solid.box", json!({"length": size, "width": size, "height": 20, "corner": [0, 0, 0], "body_name": "Case"}));
+        let corners: Vec<[f64; 3]> = vec![[0.0, 0.0, 10.0], [size, 0.0, 10.0], [size, size, 10.0], [0.0, size, 10.0]];
+        run(&mut s, "solid.fillet", json!({"edges": corners, "radius": 5}));
+        run(&mut s, "solid.shell", json!({"faces": [[size / 2.0, size / 2.0, 20.0]], "thickness": 2}));
+        for i in 0..ribs {
+            let at = 10.0 + 16.0 * i as f64;
+            run(&mut s, "solid.box", json!({"length": 2, "width": size - 4.0, "height": 6, "corner": [at, 2, 2], "operation": "join"}));
+            run(&mut s, "solid.box", json!({"length": size - 4.0, "width": 2, "height": 3, "corner": [2, at, 2], "operation": "join"}));
+        }
+        let n = names(&s, "Case");
+        assert!(n.iter().all(|(_, exact)| *exact), "{n:?}");
+        let st = s.model.state();
+        let edges = solidcraft_doc::naming::edge_names(st.body("Case").unwrap());
+        n.iter().map(|(x, _)| x.len()).chain(edges.iter().map(String::len)).max().unwrap_or(0)
+    };
+    let (few, many) = (longest(2), longest(5));
+    assert_eq!(few, many, "names grow with the ribs");
+    assert!(many < 100, "{many}");
 }

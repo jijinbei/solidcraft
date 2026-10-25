@@ -33,14 +33,16 @@ fn pieces_are_told_apart_by_the_faces_only_they_touch() {
     let faces = named(&["top", "top", "front", "back", "left", "right", "slot:a", "slot:b"]);
     let adjacent = [(0, 2), (0, 3), (0, 4), (0, 6), (1, 2), (1, 3), (1, 5), (1, 7)];
     let names = qualify(faces, &adjacent);
-    assert_eq!(names.faces[0], "top#[left,slot:a]");
-    assert_eq!(names.faces[1], "top#[right,slot:b]");
+    // As few faces as tell the pieces apart: an end wall each, the earlier-named first.
+    assert_eq!(names.faces[0], "top#[left]");
+    assert_eq!(names.faces[1], "top#[right]");
     assert!(names.verified(0) && names.verified(1));
-    // A stored name finds its piece, though the faces around it have changed since.
-    assert_eq!(matches(&names, 0, "top#[left]"), Some(Match::Piece));
-    assert_eq!(matches(&names, 1, "top#[left]"), Some(Match::Stem));
+    // A stored name finds the piece every face it lists still bounds.
+    assert_eq!(matches(&names, 0, "top#[left,slot:a]"), Some(Match::Piece));
+    assert_eq!(matches(&names, 1, "top#[left,slot:a]"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[slot:a]"), Some(Match::Piece));
     assert_eq!(matches(&names, 0, "top"), Some(Match::Piece), "a piece of the named face");
-    assert_eq!(matches(&names, 0, "top#[left,slot:a]"), Some(Match::Exact));
+    assert_eq!(matches(&names, 0, "top#[left]"), Some(Match::Exact));
     assert_eq!(matches(&names, 2, "top"), None);
 }
 
