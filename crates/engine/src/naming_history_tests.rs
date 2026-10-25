@@ -616,3 +616,32 @@ fn names_of_split_faces_do_not_grow_with_every_split() {
     assert_eq!(few, many, "names grow with the ribs");
     assert!(many < 100, "{many}");
 }
+
+/// A round on a floor edge beside a rib, on a floor the ribs split into pieces named by as few
+/// faces as tell them apart: the rib moves, and the round goes with it.
+#[test]
+fn a_round_beside_a_rib_follows_the_rib_when_it_moves() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "rib_x", "expression": "38 mm"}));
+    run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 20, "corner": [0, 0, 0], "body_name": "Case"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 10], [80, 0, 10], [80, 50, 10], [0, 50, 10]], "radius": 5}));
+    run(&mut s, "solid.shell", json!({"faces": [[40, 25, 20]], "thickness": 2}));
+    for x in [json!(18), json!("rib_x"), json!(58)] {
+        run(&mut s, "solid.box", json!({"length": 2, "width": 46, "height": 6, "corner": [x, 2, 2], "operation": "join"}));
+    }
+    for y in [12, 24, 36] {
+        run(&mut s, "solid.box", json!({"length": 76, "width": 2, "height": 3, "corner": [2, y, 2], "operation": "join"}));
+    }
+    // The floor edge on the middle rib's right side, between two cross ribs.
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 18, 2]], "radius": 1, "name": "FloorRound"}));
+    let corner = |x: f64| [x + 0.1, 18.0, 2.1];
+    assert!(solid_at(&s, corner(40.0)), "the round fills the corner beside the rib");
+    for x in ["30 mm", "46 mm"] {
+        change(&mut s, "rib_x", x);
+        assert_eq!(error(&s, "FloorRound"), None, "rib at {x}");
+        assert_eq!(warning(&s, "FloorRound"), None, "rib at {x}");
+        let at: f64 = x.trim_end_matches(" mm").parse().unwrap_or_default();
+        assert!(solid_at(&s, corner(at + 2.0)), "the round is beside the rib at {x}");
+        assert!(!solid_at(&s, corner(40.0)), "nothing is left where the rib was, at {x}");
+    }
+}
