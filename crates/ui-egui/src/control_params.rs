@@ -540,14 +540,21 @@ mod tests {
         let m: Mods = parse(&json!({"ctrl": true})).unwrap();
         assert!(m.held().ctrl && m.held().command && !m.held().mac_cmd);
         assert!(m.press().ctrl && m.press().command);
-        assert!(m.key().ctrl && !m.key().command);
         let m: Mods = parse(&json!({"cmd": true})).unwrap();
         assert!(m.held().command && m.held().mac_cmd && !m.held().ctrl);
         assert!(m.press().is_none(), "a click ignores cmd");
-        assert!(m.key().command && m.key().ctrl);
         let m: Mods = parse(&json!({"alt": true, "shift": true})).unwrap();
-        assert!(m.held().alt && m.press().alt && !m.key().alt, "a key press ignores alt");
-        assert!(m.held().shift && m.press().shift && m.key().shift);
+        assert!(m.held().alt && m.press().alt);
+        assert!(m.held().shift && m.press().shift);
+        let key = |v: Value| parse::<KeyPress>(&v).unwrap().modifiers();
+        let k = key(json!({"key": "a", "ctrl": true}));
+        assert!(k.ctrl && k.command && !k.mac_cmd);
+        let k = key(json!({"key": "a", "cmd": true}));
+        assert!(k.ctrl && k.command && !k.mac_cmd, "cmd alone is the primary modifier");
+        let k = key(json!({"key": "a", "cmd": true, "ctrl": false}));
+        assert!(!k.ctrl && k.command && k.mac_cmd, "an explicit ctrl: false is Cmd alone");
+        let k = key(json!({"key": "a", "alt": true, "shift": true}));
+        assert!(k.alt && k.shift);
     }
 
     #[test]
@@ -559,6 +566,7 @@ mod tests {
         assert!(far.contains("±1000000"), "{far}");
         assert!(parse::<KeyPress>(&json!({"key": "no such key"})).is_err());
         assert!(parse::<KeyPress>(&json!({"key": "esc"})).is_ok_and(|k| k.key.0 == egui::Key::Escape));
+        assert!(parse::<KeyPress>(&json!({"key": "esc", "pressed": "yes"})).is_err());
     }
 
     #[test]
