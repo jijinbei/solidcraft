@@ -50,20 +50,48 @@ pub struct Face {
 }
 
 /// One B-rep edge.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Edge {
     pub index: EdgeIndex,
+    #[serde(default)]
     pub name: EdgeName,
-    /// The faces it bounds: two, or one for a seam within a face.
-    pub faces: Vec<FaceIndex>,
+    /// The faces it bounds.
+    pub bounds: Bounds,
+    #[serde(default)]
     pub curve: Curve,
     /// The corners at its start and end (the same one for a closed edge).
+    #[serde(default)]
     pub ends: Option<[VertexIndex; 2]>,
     /// The mesh vertices along it from start to end: the triangle sides on the edge, exactly.
     /// Empty when the mesh does not hold the edge.
+    #[serde(default)]
     pub path: Vec<MeshVertex>,
+}
+
+/// The faces an edge bounds. JSON: `{"between": [2, 5]}` or `{"seam": 3}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Bounds {
+    /// Where two faces meet.
+    Between(FaceIndex, FaceIndex),
+    /// Where one face meets itself (the seam of a closed surface).
+    Seam(FaceIndex),
+}
+
+impl Bounds {
+    /// The faces, one or two.
+    pub fn faces(self) -> impl Iterator<Item = FaceIndex> {
+        let (a, b) = match self {
+            Bounds::Between(a, b) => (a, Some(b)),
+            Bounds::Seam(a) => (a, None),
+        };
+        std::iter::once(a).chain(b)
+    }
+
+    pub fn contains(self, face: FaceIndex) -> bool {
+        self.faces().any(|f| f == face)
+    }
 }
 
 /// One B-rep corner.
@@ -112,22 +140,48 @@ pub enum Surface {
         major: Mm,
         minor: Mm,
     },
-    /// A B-spline or NURBS patch: `points[i][j]` weighted `weights[i][j]` (all 1 for a B-spline)
-    /// over the knots `knots_u` (index i) and `knots_v` (index j); ∂S/∂u × ∂S/∂v points out of
-    /// the material. The face is the part of the patch its edges bound.
+    /// A B-spline or NURBS patch: `net[i][j]` over the knots `u` (index i) and `v` (index j);
+    /// ∂S/∂u × ∂S/∂v points out of the material. The face is the part of the patch its edges
+    /// bound.
     Nurbs {
-        degree_u: u32,
-        degree_v: u32,
-        knots_u: Vec<f64>,
-        knots_v: Vec<f64>,
-        points: Vec<Vec<Point>>,
-        weights: Vec<Vec<f64>>,
+        u: Knots,
+        v: Knots,
+        net: Vec<Vec<ControlPoint>>,
     },
     /// Any other surface (a spline swept round an axis, an imported mesh), or a kind this
     /// version does not know.
     #[default]
     #[serde(other)]
     Other,
+}
+
+/// A NURBS patch's knot vector in one direction: as many knots as control points there plus
+/// the degree plus one, non-decreasing.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Knots {
+    pub degree: u32,
+    pub knots: Vec<f64>,
+}
+
+/// A NURBS control point and its weight (1 for a B-spline).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ControlPoint {
+    pub point: Point,
+    pub weight: f64,
+}
+
+impl Knots {
+    pub fn new(degree: u32, knots: Vec<f64>) -> Self {
+        Knots { degree, knots }
+    }
+}
+
+impl ControlPoint {
+    pub fn new(point: Point, weight: f64) -> Self {
+        ControlPoint { point, weight }
+    }
 }
 
 /// The curve an edge lies on.
@@ -151,4 +205,67 @@ pub enum Curve {
     #[default]
     #[serde(other)]
     Other,
+}
+
+impl Body {
+    /// The position of a mesh vertex.
+    pub fn position(&self, v: MeshVertex) -> Option<Point> {
+        self.positions.get(v.index()).copied()
+    }
+
+    pub fn face(&self, f: FaceIndex) -> Option<&Face> {
+        self.faces.get(f.index())
+    }
+
+    pub fn edge(&self, e: EdgeIndex) -> Option<&Edge> {
+        self.edges.get(e.index())
+    }
+
+    pub fn vertex(&self, v: VertexIndex) -> Option<&Vertex> {
+        self.vertices.get(v.index())
+    }
+
+    /// The face with this persistent name.
+    pub fn face_named(&self, name: &str) -> Option<&Face> {
+        self.faces.iter().find(|f| f.name == *name)
+    }
+
+    /// The edge with this persistent name.
+    pub fn edge_named(&self, name: &str) -> Option<&Edge> {
+        self.edges.iter().find(|e| e.name == *name)
+    }
+
+    /// Every triangle with the face it is on and its corners' positions.
+    pub fn triangles(&self) -> impl Iterator<Item = (&Face, [Point; 3])> + '_ {
+        self.faces
+            .iter()
+            .flat_map(move |f| f.triangles.iter().filter_map(move |t| Some((f, [self.position(t[0])?, self.position(t[1])?, self.position(t[2])?]))))
+    }
+
+    /// The edges that bound `face`.
+    pub fn edges_of(&self, face: FaceIndex) -> impl Iterator<Item = &Edge> + '_ {
+        self.edges.iter().filter(move |e| e.bounds.contains(face))
+    }
+
+    /// The edges that end at `vertex`.
+    pub fn edges_at(&self, vertex: VertexIndex) -> impl Iterator<Item = &Edge> + '_ {
+        self.vertex(vertex).into_iter().flat_map(move |v| v.edges.iter().filter_map(move |e| self.edge(*e)))
+    }
+}
+
+impl Edge {
+    /// The positions along the edge, start to end.
+    pub fn points<'a>(&'a self, body: &'a Body) -> impl Iterator<Item = Point> + 'a {
+        self.path.iter().filter_map(move |v| body.position(*v))
+    }
+}
+
+impl Face {
+    /// The mesh vertices the face's triangles use, each once, in ascending order.
+    pub fn mesh_vertices(&self) -> Vec<MeshVertex> {
+        let mut v: Vec<MeshVertex> = self.triangles.iter().flatten().copied().collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
 }

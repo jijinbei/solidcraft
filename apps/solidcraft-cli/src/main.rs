@@ -549,8 +549,7 @@ fn cmd_export_snapshot(args: &[String]) -> Result<(), String> {
     }
     if let Some(file) = flag(args, "--edits") {
         let text = solidcraft_engine::io::vfs::read(file, 16 << 20).map_err(|e| format!("{file}: {e}"))?;
-        let text = String::from_utf8(text).map_err(|_| format!("{file}: not UTF-8 text"))?;
-        edits.extend(solidcraft_exchange::edits_from_json(&text).map_err(|e| format!("{file}: {e}"))?);
+        edits.extend(serde_json::from_slice::<Vec<Edit>>(&text).map_err(|e| format!("{file}: edits: {e}"))?);
     }
     if !edits.is_empty() {
         options = options.with_edits(edits);

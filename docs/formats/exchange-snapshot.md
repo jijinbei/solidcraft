@@ -41,7 +41,17 @@ solidcraft-cli export-snapshot part.sc --out part.json --param width=30 --param 
 ```
 
 `--param` takes a number in the unit the design shows the parameter in, or an expression;
-`--edits` a JSON array of edits as below.
+`--edits` a JSON array of edits: `{"suppress": 4}`,
+`{"partition": {"name", "plane": {"point", "normal"}, "bodies"?}}`,
+`{"split_face": {"name", "body", "face", "plane"}}`.
+
+`from_json` reads a snapshot and checks it (`Snapshot::validate`): every index refers to
+something there, every direction is a unit vector, coordinates are finite, NURBS patches are
+well formed, body names are unique. A `Snapshot` in hand can therefore be walked safely, by
+reference rather than by index: `body.triangles()` (each with its face and corner positions),
+`body.edges_of(face)`, `body.edges_at(corner)`, `edge.points(&body)`, `body.face_named(..)`.
+Lengths and angles add, scale and print with their unit (`Mm(3.0) * 2.0`, `"6 mm"`), and
+names key maps that look up by `&str`.
 
 ## Types
 
@@ -78,8 +88,9 @@ objects (`{"type": "cylinder", …}`), each with an `other` for kinds the reader
          "triangles": [[0, 2, 1], ...], "features": [2], "attributes": {}}
       ],
       "edges": [
-        {"index": 8, "name": "F2:side:s1#6|F2:side:s1#7", "faces": [1, 2],
-         "curve": {"type": "line", "start": [14, 14, 0], "end": [14, 14, 15]}, "ends": [7, 8], "path": [22, 183]}
+        {"index": 8, "name": "F2:side:s1#6|F2:side:s1#7",
+         "bounds": {"between": [1, 2]}, "curve": {"type": "line", "start": [14, 14, 0], "end": [14, 14, 15]},
+         "ends": [7, 8], "path": [22, 183]}
       ],
       "vertices": [
         {"index": 0, "name": "F2:side:s1#3|F2:side:s1#6|F2:start", "point": [20, 0, 0], "position": 0, "edges": [0, 7, 10]}
@@ -124,11 +135,13 @@ objects (`{"type": "cylinder", …}`), each with an `other` for kinds the reader
   shaped the face, and its surface: `plane` (`point`, `normal` out of the material), `cylinder`
   (`origin`, `axis`, `radius`), `cone` (`apex`, `axis` into the cone, `half_angle`), `sphere`
   (`center`, `radius`), `torus` (`center`, `axis`, `major`, negative on a spindle torus's inner
-  sheet, `minor`), `nurbs` (`degree_u`, `degree_v`, `knots_u`, `knots_v`, control `points[i][j]`
-  and `weights[i][j]`, all 1 for a B-spline; ∂S/∂u × ∂S/∂v points out of the material; the face
-  is the part its edges bound) or `other`.
+  sheet, `minor`), `nurbs` (`u` and `v`, each `{degree, knots}` with as many knots as control
+  points that way plus the degree plus one; `net[i][j]`, each `{point, weight}`, weight 1 for a
+  B-spline; ∂S/∂u × ∂S/∂v points out of the material; the face is the part its edges bound) or
+  `other`.
 - **Edges.** In the body's edge order: named after the faces they bound (`~k` when several share
-  them), with those faces, the exact `curve` (`line` with `start` and `end`; `circle` with
+  them), with those faces (`bounds`: `{"between": [a, b]}`, or `{"seam": a}` where a closed
+  surface meets itself), the exact `curve` (`line` with `start` and `end`; `circle` with
   `center`, `axis`, `radius` and the `angle` it runs counter-clockwise about the axis; `other`),
   the corners at its `ends`, and its `path`: the mesh vertices along it from start to end, the
   weld's own (the triangle sides on the edge, exactly).

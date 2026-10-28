@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use std::f64::consts::PI;
 
 use common::*;
-use solidcraft_exchange::{Curve, MeshVertex, Mm, Options, Point, Radians, Surface, Tolerance, open};
+use solidcraft_exchange::{Body, Bounds, ControlPoint, Curve, Edge, Knots, MeshVertex, Mm, Options, Point, Radians, Surface, Tolerance, open};
 
 /// How far welding may move a point of the 30 mm plate (10⁻⁶ of its size, with margin).
 const WELD: f64 = 1e-4;
@@ -31,14 +31,15 @@ fn edges_are_named_exact_and_traced_by_the_mesh() {
     let (mut lines, mut circles) = (0, 0);
     for (i, e) in b.edges.iter().enumerate() {
         assert_eq!(e.index.index(), i);
-        assert_eq!(e.faces.len(), 2, "{}", e.name);
+        let Bounds::Between(f0, f1) = e.bounds else { panic!("{} is a seam", e.name) };
         assert!(e.path.len() >= 2, "{} has no path", e.name);
         assert!(e.path.windows(2).all(|w| sides.contains(&(w[0].min(w[1]), w[0].max(w[1])))), "{} runs along triangle sides", e.name);
         // Every side of the path lies between the edge's two faces.
         let between = |f: usize, v: MeshVertex, w: MeshVertex| {
             b.faces[f].triangles.iter().any(|t| (0..3).any(|k| (t[k], t[(k + 1) % 3]) == (v, w) || (t[k], t[(k + 1) % 3]) == (w, v)))
         };
-        assert!(e.path.windows(2).all(|w| e.faces.iter().all(|f| between(f.index(), w[0], w[1]))), "{}", e.name);
+        assert!(e.path.windows(2).all(|w| [f0, f1].iter().all(|f| between(f.index(), w[0], w[1]))), "{}", e.name);
+        assert!(body_faces_bounded(b, e), "{}", e.name);
         // Its ends are corners, at the path's ends.
         let [start, end] = e.ends.unwrap_or_else(|| panic!("{} has no ends", e.name));
         assert!(dist(b.vertices[start.index()].point.0, at(b, e.path[0])) < WELD, "{}", e.name);
@@ -63,6 +64,11 @@ fn edges_are_named_exact_and_traced_by_the_mesh() {
     assert_eq!((lines, circles), (14, 4));
 }
 
+/// The edge is among the edges of each face it bounds, and its points are its path's positions.
+fn body_faces_bounded(b: &Body, e: &Edge) -> bool {
+    e.bounds.faces().all(|f| b.edges_of(f).any(|x| x.index == e.index)) && e.points(b).count() == e.path.len()
+}
+
 /// The corners: the box's 8 and the ends of the hole's 2 seams. A box corner is where three
 /// faces meet; each corner is a mesh vertex; names are unique.
 #[test]
@@ -76,8 +82,9 @@ fn corners_are_where_edges_end() {
         assert_eq!(v.index.index(), k);
         let at_mesh = v.position.unwrap_or_else(|| panic!("{} has no mesh vertex", v.name));
         assert!(dist(at(b, at_mesh), v.point.0) < WELD, "{}", v.name);
-        for e in &v.edges {
-            assert!(b.edges[e.index()].ends.is_some_and(|ends| ends.contains(&v.index)), "{} {}", v.name, b.edges[e.index()].name);
+        assert_eq!(b.edges_at(v.index).count(), v.edges.len());
+        for e in b.edges_at(v.index) {
+            assert!(e.ends.is_some_and(|ends| ends.contains(&v.index)), "{} {}", v.name, e.name);
         }
     }
     let corner = b.vertices.iter().find(|v| dist(v.point.0, [0.0, 0.0, 0.0]) < 1e-9).unwrap();
@@ -90,8 +97,7 @@ struct Patch<'a> {
     dv: usize,
     ku: &'a [f64],
     kv: &'a [f64],
-    points: &'a [Vec<Point>],
-    weights: &'a [Vec<f64>],
+    net: &'a [Vec<ControlPoint>],
 }
 
 fn basis(knots: &[f64], degree: usize, i: usize, t: f64) -> f64 {
@@ -114,19 +120,20 @@ fn basis(knots: &[f64], degree: usize, i: usize, t: f64) -> f64 {
 
 impl Patch<'_> {
     fn range(&self) -> ([f64; 2], [f64; 2]) {
-        let (nu, nv) = (self.points.len(), self.points[0].len());
+        let (nu, nv) = (self.net.len(), self.net[0].len());
         ([self.ku[self.du], self.ku[nu]], [self.kv[self.dv], self.kv[nv]])
     }
 
     fn at(&self, u: f64, v: f64) -> [f64; 3] {
         let (mut sum, mut w) = ([0.0; 3], 0.0);
-        for (i, row) in self.points.iter().enumerate() {
+        for (i, row) in self.net.iter().enumerate() {
             let bu = basis(self.ku, self.du, i, u);
             if bu == 0.0 {
                 continue;
             }
-            for (j, Point(p)) in row.iter().enumerate() {
-                let b = bu * basis(self.kv, self.dv, j, v) * self.weights[i][j];
+            for (j, c) in row.iter().enumerate() {
+                let p = c.point.0;
+                let b = bu * basis(self.kv, self.dv, j, v) * c.weight;
                 for k in 0..3 {
                     sum[k] += b * p[k];
                 }
@@ -177,19 +184,15 @@ fn free_form_faces_are_nurbs_patches_their_mesh_lies_on() {
     let b = &s.bodies[0];
     let mut patches = 0;
     for f in &b.faces {
-        let Surface::Nurbs { degree_u, degree_v, knots_u, knots_v, points, weights } = &f.surface else { continue };
+        let Surface::Nurbs { u: Knots { degree: du, knots: ku, .. }, v: Knots { degree: dv, knots: kv, .. }, net } = &f.surface else { continue };
         patches += 1;
-        assert_eq!(knots_u.len(), points.len() + *degree_u as usize + 1, "{}", f.name);
-        assert_eq!(knots_v.len(), points[0].len() + *degree_v as usize + 1, "{}", f.name);
-        let patch = Patch { du: *degree_u as usize, dv: *degree_v as usize, ku: knots_u, kv: knots_v, points, weights };
-        let used: BTreeSet<MeshVertex> = f.triangles.iter().flatten().copied().collect();
-        for v in used {
+        let patch = Patch { du: *du as usize, dv: *dv as usize, ku, kv, net };
+        for v in f.mesh_vertices() {
             let p = at(b, v);
             let (u, w) = patch.nearest(p);
             assert!(dist(patch.at(u, w), p) < 1e-6, "{}: a vertex is {} off its patch", f.name, dist(patch.at(u, w), p));
         }
-        for t in &f.triangles {
-            let [a, c, d] = t.map(|v| at(b, v));
+        for (_, [Point(a), Point(c), Point(d)]) in b.triangles().filter(|(on, _)| on.index == f.index) {
             let centre = [(a[0] + c[0] + d[0]) / 3.0, (a[1] + c[1] + d[1]) / 3.0, (a[2] + c[2] + d[2]) / 3.0];
             let (u, w) = patch.nearest(centre);
             assert!(dot(patch.normal(u, w), cross(sub(c, a), sub(d, a))) > 0.0, "{}: the patch faces into the material", f.name);

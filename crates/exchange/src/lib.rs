@@ -90,20 +90,13 @@ pub fn to_json(snapshot: &Snapshot) -> Result<String> {
     serde_json::to_string(snapshot).map_err(|e| Error::Invalid(format!("snapshot as JSON: {e}")))
 }
 
-/// A snapshot read from JSON. A schema above [`SCHEMA`] is refused; unknown fields are ignored.
+/// A snapshot read from JSON, checked ([`Snapshot::validate`]). A schema above [`SCHEMA`] is
+/// refused; unknown fields are ignored.
 pub fn from_json(text: &str) -> Result<Snapshot> {
     let s: Snapshot = serde_json::from_str(text).map_err(|e| Error::Read(format!("snapshot JSON: {e}")))?;
     if s.schema > SCHEMA {
         return Err(Error::NotSupported(format!("snapshot schema {} (this reader knows up to {SCHEMA})", s.schema)));
     }
+    s.validate()?;
     Ok(s)
-}
-
-/// Edits from their JSON array (as [`Edit`] describes), refused past [`MAX_EDITS`].
-pub fn edits_from_json(text: &str) -> Result<Vec<Edit>> {
-    let edits: Vec<Edit> = serde_json::from_str(text).map_err(|e| Error::Invalid(format!("edits JSON: {e}")))?;
-    if edits.len() > MAX_EDITS {
-        return Err(Error::Limit(format!("{} edits, over {MAX_EDITS}", edits.len())));
-    }
-    Ok(edits)
 }

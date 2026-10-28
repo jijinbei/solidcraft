@@ -6,8 +6,7 @@ use std::f64::consts::PI;
 
 use common::*;
 use solidcraft_exchange::{
-    AppliedEdit, BodyName, Curve, Direction, Edit, Error, FeatureId, FeatureKind, Mm, Operation, Plane, Point, Surface, edits_from_json, open,
-    to_json,
+    AppliedEdit, BodyName, Curve, Direction, Edit, Error, FeatureId, FeatureKind, Mm, Operation, Plane, Point, Surface, open, to_json,
 };
 
 fn plane(point: [f64; 3], normal: [f64; 3]) -> Plane {
@@ -129,7 +128,8 @@ fn hostile_edits_are_refused_without_panicking() {
     let s = snap_with(&doc, vec![miss]).unwrap();
     assert_eq!((s.bodies.len(), s.edits[0].features.len()), (1, 0));
     // The JSON form; a zero normal is no direction.
-    let edits = edits_from_json(r#"[{"suppress": 2}, {"partition": {"name": "Mid", "plane": {"point": [5, 0, 0], "normal": [2, 0, 0]}}}]"#).unwrap();
+    let edits: Vec<Edit> =
+        serde_json::from_str(r#"[{"suppress": 2}, {"partition": {"name": "Mid", "plane": {"point": [5, 0, 0], "normal": [2, 0, 0]}}}]"#).unwrap();
     assert_eq!(edits, vec![Edit::Suppress(FeatureId(2)), Edit::Partition { name: "Mid".into(), plane: x, bodies: Vec::new() }]);
     for bad in [
         "{",
@@ -139,7 +139,7 @@ fn hostile_edits_are_refused_without_panicking() {
         r#"[{"partition": {"name": "x", "plane": {"point": [0, 0, 0], "normal": [0, 0, 0]}}}]"#,
         r#"[{"suppress": 1, "extra": 2}]"#,
     ] {
-        assert!(edits_from_json(bad).is_err(), "{bad}");
+        assert!(serde_json::from_str::<Vec<Edit>>(bad).is_err(), "{bad}");
     }
     // Edits give the same bytes every time.
     let cut = Edit::Partition { name: "Mid".into(), plane: x, bodies: Vec::new() };

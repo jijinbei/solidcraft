@@ -19,10 +19,11 @@ mod geometry;
 mod ids;
 mod material;
 mod parameter;
+mod validate;
 
 use serde::{Deserialize, Serialize};
 
-pub use body::{Body, Curve, Edge, Face, Surface, Vertex};
+pub use body::{Body, Bounds, ControlPoint, Curve, Edge, Face, Knots, Surface, Vertex};
 pub use edit::{AppliedEdit, Edit};
 pub use feature::{Feature, FeatureKind, Input, Operation, Profile, Sketch, SketchCurve};
 pub use geometry::{Direction, Frame, LengthUnit, Mm, Plane, Point, Point2, Quantity, Radians, Transform};
@@ -56,6 +57,14 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// Checks that every index refers to something there, every direction is a unit vector,
+    /// every coordinate is finite and every NURBS patch is well formed. [`crate::from_json`]
+    /// refuses a snapshot that fails it, and snapshots this crate takes pass it, so a
+    /// `Snapshot` in hand can be walked without bounds surprises.
+    pub fn validate(&self) -> crate::Result<()> {
+        validate::snapshot(self).map_err(crate::Error::Invalid)
+    }
+
     /// The body with this name.
     pub fn body(&self, name: &str) -> Option<&Body> {
         self.bodies.iter().find(|b| b.name == *name)
@@ -64,17 +73,5 @@ impl Snapshot {
     /// The feature with this id.
     pub fn feature(&self, id: FeatureId) -> Option<&Feature> {
         self.features.iter().find(|f| f.id == id)
-    }
-}
-
-impl Body {
-    /// The face with this name.
-    pub fn face(&self, name: &str) -> Option<&Face> {
-        self.faces.iter().find(|f| f.name == *name)
-    }
-
-    /// The position of a mesh vertex.
-    pub fn position(&self, v: MeshVertex) -> Option<Point> {
-        self.positions.get(v.index()).copied()
     }
 }

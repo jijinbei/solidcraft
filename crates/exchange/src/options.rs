@@ -18,6 +18,18 @@ impl From<Quantity> for Override {
     }
 }
 
+impl From<crate::schema::Mm> for Override {
+    fn from(l: crate::schema::Mm) -> Self {
+        Override::Value(l.into())
+    }
+}
+
+impl From<crate::schema::Radians> for Override {
+    fn from(a: crate::schema::Radians) -> Self {
+        Override::Value(a.into())
+    }
+}
+
 impl From<&str> for Override {
     fn from(e: &str) -> Self {
         Override::Expression(e.to_string())
@@ -55,21 +67,25 @@ pub struct Options {
 
 impl Options {
     /// The options with this parameter overridden (after the overrides already given).
+    #[must_use]
     pub fn with_override(mut self, name: impl Into<ParameterName>, value: impl Into<Override>) -> Self {
         self.overrides.push((name.into(), value.into()));
         self
     }
 
+    #[must_use]
     pub fn with_tolerance(mut self, tolerance: Tolerance) -> Self {
         self.tolerance = tolerance;
         self
     }
 
+    #[must_use]
     pub fn with_bodies(mut self, bodies: Vec<BodyName>) -> Self {
         self.bodies = Some(bodies);
         self
     }
 
+    #[must_use]
     pub fn with_edits(mut self, edits: Vec<Edit>) -> Self {
         self.edits = edits;
         self

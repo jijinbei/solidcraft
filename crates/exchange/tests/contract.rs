@@ -298,3 +298,71 @@ fn hostile_input_is_refused_without_panicking() {
     // A text parameter takes a text.
     assert!(with("label", "\"B\"".into()).is_ok());
 }
+
+/// What this crate writes is consistent; what refers to nothing, or is malformed, is refused
+/// when read, so a `Snapshot` in hand can be walked safely.
+#[test]
+fn snapshots_are_checked_when_read() {
+    let doc = holed_doc();
+    let s = snap(&doc);
+    s.validate().unwrap();
+    let blob = open(include_bytes!("fixtures/spline-extrude.json")).unwrap().snapshot(&Options::default()).unwrap();
+    blob.validate().unwrap();
+    let text = to_json(&s).unwrap();
+    let broken = |path: &[&str], value: serde_json::Value| {
+        let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let mut at = &mut v;
+        for k in path {
+            at = match k.parse::<usize>() {
+                Ok(i) => &mut at[i],
+                Err(_) => &mut at[*k],
+            };
+        }
+        *at = value;
+        from_json(&v.to_string())
+    };
+    let cases: [(&[&str], serde_json::Value); 8] = [
+        (&["bodies", "0", "faces", "0", "triangles", "0"], serde_json::json!([0, 1, 999_999])),
+        (&["bodies", "0", "faces", "1", "index"], serde_json::json!(7)),
+        (&["bodies", "0", "edges", "0", "bounds"], serde_json::json!({"between": [0, 99]})),
+        (&["bodies", "0", "edges", "0", "bounds"], serde_json::json!({"between": [2, 2]})),
+        (&["bodies", "0", "edges", "0", "path"], serde_json::json!([0, 999_999])),
+        (&["bodies", "0", "vertices", "0", "edges"], serde_json::json!([99])),
+        (&["bodies", "0", "material"], serde_json::json!("Unobtainium")),
+        (
+            &["bodies", "0", "faces", "0", "surface"],
+            serde_json::json!({"type": "nurbs", "u": {"degree": 1, "knots": [0, 1]}, "v": {"degree": 1, "knots": [0, 0, 1, 1]}, "net": [[{"point": [0, 0, 0], "weight": 1}, {"point": [1, 0, 0], "weight": 1}]]}),
+        ),
+    ];
+    for (path, value) in cases {
+        assert!(matches!(broken(path, value.clone()), Err(Error::Invalid(_)) | Err(Error::Read(_))), "{path:?} = {value}");
+    }
+    // Two bodies of one name.
+    let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let first = v["bodies"][0].clone();
+    v["bodies"].as_array_mut().unwrap().push(first);
+    assert!(matches!(from_json(&v.to_string()), Err(Error::Invalid(_))));
+}
+
+/// The typed accessors walk a body without indices.
+#[test]
+fn bodies_are_walked_by_reference() {
+    let s = snap(&holed_doc());
+    let b = &s.bodies[0];
+    assert_eq!(b.triangles().count(), b.faces.iter().map(|f| f.triangles.len()).sum::<usize>());
+    let area: f64 = b.triangles().map(|(_, [a, c, d])| norm(cross(sub(c.0, a.0), sub(d.0, a.0))) / 2.0).sum();
+    // 2 × 400 − 2 × 9π of the faces, 4 × 200 sides and the faceted hole wall (2π·3·10, a little less).
+    let exact = 2.0 * 400.0 - 2.0 * 9.0 * PI + 800.0 + 2.0 * PI * 3.0 * 10.0;
+    assert!((area - exact).abs() < 0.5, "{area} {exact}");
+    let top = b.faces.iter().find(|f| matches!(f.surface, Surface::Plane { normal, .. } if normal.get()[2] > 0.5)).unwrap();
+    assert_eq!(b.face_named(top.name.as_str()).map(|f| f.index), Some(top.index));
+    // The top is bounded by the box's 4 top edges and the hole's 2 rim arcs.
+    assert_eq!(b.edges_of(top.index).count(), 6);
+    // A map keyed by face name looks up by `&str`.
+    let by_name: BTreeMap<FaceName, usize> = b.faces.iter().map(|f| (f.name.clone(), f.triangles.len())).collect();
+    assert_eq!(by_name.get(top.name.as_str()), Some(&top.triangles.len()));
+}
+
+fn norm(v: [f64; 3]) -> f64 {
+    dot(v, v).sqrt()
+}

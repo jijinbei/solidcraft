@@ -10,8 +10,8 @@ use super::Budget;
 use crate::error::{Error, Result};
 use crate::options::Tolerance;
 use crate::schema::{
-    Body, BodyName, Curve, Direction, Edge, EdgeIndex, EdgeName, Face, FaceIndex, FaceName, MaterialName, MeshVertex, Mm, Point, Radians, Surface,
-    Vertex, VertexIndex, VertexName,
+    Body, BodyName, Bounds, ControlPoint, Curve, Direction, Edge, EdgeIndex, EdgeName, Face, FaceIndex, FaceName, Knots, MaterialName, MeshVertex,
+    Mm, Point, Radians, Surface, Vertex, VertexIndex, VertexName,
 };
 use crate::{MAX_CONTROL_POINTS, MAX_FACES, MAX_TRIANGLES, MIN_TOLERANCE_MM};
 
@@ -74,7 +74,7 @@ pub(crate) fn body(doc: &Document, b: &ModelBody, tolerance: Tolerance, budget: 
     let edges: Vec<Edge> = paths
         .into_iter()
         .enumerate()
-        .map(|(i, path)| {
+        .map(|(i, path)| -> Result<Edge> {
             let path: Vec<MeshVertex> = path.into_iter().map(MeshVertex).collect();
             // The kernel's ends, in the direction the path runs.
             let ends = corners.ends.get(i).map(|&[a, z]| {
@@ -86,16 +86,21 @@ pub(crate) fn body(doc: &Document, b: &ModelBody, tolerance: Tolerance, budget: 
                 let [a, z] = if flipped { [z, a] } else { [a, z] };
                 [VertexIndex(index32(a)), VertexIndex(index32(z))]
             });
-            Edge {
+            let bounds = match edge_faces.get(i).map(Vec::as_slice) {
+                Some(&[a, c]) if a != c => Bounds::Between(FaceIndex(a), FaceIndex(c)),
+                Some(&[a, ..]) => Bounds::Seam(FaceIndex(a)),
+                _ => return Err(Error::Invalid(format!("body {}: edge {i} bounds no face", b.name))),
+            };
+            Ok(Edge {
                 index: EdgeIndex(index32(i)),
                 name: EdgeName(edge_names.get(i).cloned().unwrap_or_default()),
-                faces: edge_faces.get(i).map(|fs| fs.iter().map(|f| FaceIndex(*f)).collect()).unwrap_or_default(),
+                bounds,
                 curve: curve(&b.body, i),
                 ends,
                 path,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
 
     let vertex_names = solidcraft_doc::naming::vertex_names(b);
     let vertices = corners
@@ -181,14 +186,8 @@ fn surface(body: &solidcraft_kernel::Body, i: usize, budget: &mut Budget, name: 
         return Err(Error::Limit(format!("body {name} brings the snapshot over {MAX_CONTROL_POINTS} NURBS control points")));
     }
     budget.control_points -= count;
-    Ok(Surface::Nurbs {
-        degree_u: index32(n.degree_u),
-        degree_v: index32(n.degree_v),
-        knots_u: n.knots_u,
-        knots_v: n.knots_v,
-        points: n.points.iter().map(|row| row.iter().map(|p| point(*p)).collect()).collect(),
-        weights: n.weights,
-    })
+    let net = n.points.iter().zip(&n.weights).map(|(ps, ws)| ps.iter().zip(ws).map(|(p, w)| ControlPoint::new(point(*p), *w)).collect()).collect();
+    Ok(Surface::Nurbs { u: Knots { degree: index32(n.degree_u), knots: n.knots_u }, v: Knots { degree: index32(n.degree_v), knots: n.knots_v }, net })
 }
 
 /// Edge `i`'s curve: a line, a circle, else other.

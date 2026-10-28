@@ -40,6 +40,19 @@ macro_rules! name_type {
             }
         }
 
+        impl AsRef<str> for $name {
+            fn as_ref(&self) -> &str {
+                &self.0
+            }
+        }
+
+        // A name's order, equality and hash are its string's, so maps keyed by it look up by `&str`.
+        impl std::borrow::Borrow<str> for $name {
+            fn borrow(&self) -> &str {
+                &self.0
+            }
+        }
+
         impl PartialEq<str> for $name {
             fn eq(&self, other: &str) -> bool {
                 self.0 == other
