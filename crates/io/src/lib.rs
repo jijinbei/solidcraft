@@ -768,7 +768,21 @@ pub fn tagged_mesh(body: &solidcraft_kernel::Body, tolerance: f64) -> Result<Tag
     if !(tolerance.is_finite() && tolerance > 0.0) {
         return Err(IoError::Invalid(format!("chord tolerance {tolerance} is not a positive number")));
     }
-    Ok(welded_tagged(body, &body.tessellate(tolerance)?)?.0)
+    Ok(tagged_mesh_with_edges(body, tolerance)?.0)
+}
+
+/// [`tagged_mesh`] with the tessellation's B-rep edges: per edge (in the body's edge order) its
+/// polyline and the faces it bounds.
+pub fn tagged_mesh_with_edges(
+    body: &solidcraft_kernel::Body,
+    tolerance: f64,
+) -> Result<(TaggedMesh, Vec<Vec<solidcraft_geom::Vec3>>, Vec<Vec<u32>>)> {
+    if !(tolerance.is_finite() && tolerance > 0.0) {
+        return Err(IoError::Invalid(format!("chord tolerance {tolerance} is not a positive number")));
+    }
+    let m = body.tessellate(tolerance)?;
+    let tagged = welded_tagged(body, &m)?.0;
+    Ok((tagged, m.edges, m.edge_faces))
 }
 
 /// `m` (a tessellation of `b`) welded as the 3MF export welds it, with each triangle's face, and

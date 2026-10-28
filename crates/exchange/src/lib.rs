@@ -30,7 +30,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod features;
 pub mod schema;
+mod topology;
 
 use std::collections::BTreeSet;
 use std::sync::Mutex;
@@ -40,7 +42,10 @@ use solidcraft_doc::physical_material::{Elasticity, MaterialAxes, PropertyData, 
 use solidcraft_doc::{Document, Model, ModelBody};
 use solidcraft_kernel::FaceSurface;
 
-pub use schema::{Body, Face, Material, MaterialProperty, Parameter, ParameterKind, ParameterSource, SCHEMA, Snapshot, Surface};
+pub use schema::{
+    AppliedEdit, Body, Curve, Edge, Face, Feature, Material, MaterialProperty, Parameter, ParameterKind, ParameterSource, Profile, SCHEMA, Sketch,
+    SketchCurve, Snapshot, Surface, Vertex,
+};
 
 /// Largest design file [`open`] reads (the design reader's own limit).
 pub const MAX_DESIGN_BYTES: usize = solidcraft_io::MAX_DESIGN_BYTES;
@@ -56,6 +61,12 @@ pub const MAX_BODIES: usize = 100_000;
 pub const MAX_FACES: usize = 1_000_000;
 /// Most triangles in one snapshot (all bodies together).
 pub const MAX_TRIANGLES: usize = 20_000_000;
+/// Most edits one snapshot takes.
+pub const MAX_EDITS: usize = 1024;
+/// Most NURBS control points in one snapshot (all faces together).
+pub const MAX_CONTROL_POINTS: usize = 10_000_000;
+/// Longest edit name (bytes).
+pub const MAX_NAME_BYTES: usize = 256;
 /// Finest chord tolerance (mm); the export meshes never go below it either.
 pub const MIN_TOLERANCE_MM: f64 = 1e-3;
 /// Coarsest absolute chord tolerance (mm).
@@ -131,6 +142,35 @@ impl Default for Tolerance {
     }
 }
 
+/// A change made to the design before it is evaluated, on a copy: the design itself is left as
+/// it is. Edits apply in order, after the parameter overrides, as timeline features at the end
+/// of the timeline, so faces they make get persistent names that name them
+/// ([`Snapshot::edits`] gives their feature ids).
+///
+/// As JSON: `{"suppress": 3}`, `{"partition": {"name", "point", "normal", "bodies"?}}`,
+/// `{"split_face": {"name", "body", "face", "point", "normal"}}` ([`edits_from_json`]).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum Edit {
+    /// Rebuild without the feature `F<id>` (a hole filled, a fillet back to its sharp edge, a
+    /// boss gone). Suppressing a feature that makes a body takes that body away; one a later
+    /// feature needs fails that feature ([`Error::Evaluation`]).
+    Suppress(u64),
+    /// Cut bodies by the plane through `point` square to `normal`: each body the plane crosses
+    /// becomes two (only `bodies`, when not empty). The cut faces are named after the split.
+    Partition {
+        name: String,
+        point: [f64; 3],
+        normal: [f64; 3],
+        #[serde(default)]
+        bodies: Vec<String>,
+    },
+    /// Split face `face` (a persistent name) of `body` where the plane through `point` square to
+    /// `normal` meets it; the solid is unchanged, the pieces are named after the face (`#k`).
+    SplitFace { name: String, body: String, face: String, point: [f64; 3], normal: [f64; 3] },
+}
+
 /// What a snapshot contains.
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
@@ -138,12 +178,20 @@ pub struct Options {
     pub tolerance: Tolerance,
     /// Only these bodies (by [`Body::name`]); all when `None`.
     pub bodies: Option<Vec<String>>,
+    /// Edits made before evaluating ([`Edit`]).
+    pub edits: Vec<Edit>,
 }
 
 impl Options {
     /// The options with this chord tolerance.
     pub fn with_tolerance(mut self, tolerance: Tolerance) -> Self {
         self.tolerance = tolerance;
+        self
+    }
+
+    /// The options with these edits.
+    pub fn with_edits(mut self, edits: Vec<Edit>) -> Self {
+        self.edits = edits;
         self
     }
 
@@ -170,6 +218,15 @@ pub fn open(bytes: &[u8]) -> Result<Design> {
     }
     let doc = solidcraft_io::read_design(bytes).map_err(|e| Error::Read(e.to_string()))?;
     Ok(Design { doc, model: Mutex::new(Model::new()) })
+}
+
+/// Edits from their JSON array (as [`Edit`] describes), refused past [`MAX_EDITS`].
+pub fn edits_from_json(text: &str) -> Result<Vec<Edit>> {
+    let edits: Vec<Edit> = serde_json::from_str(text).map_err(|e| Error::Invalid(format!("edits JSON: {e}")))?;
+    if edits.len() > MAX_EDITS {
+        return Err(Error::Limit(format!("{} edits, over {MAX_EDITS}", edits.len())));
+    }
+    Ok(edits)
 }
 
 /// The snapshot as JSON: deterministic bytes (fixed field and element order, shortest
@@ -203,16 +260,9 @@ impl Design {
     /// itself is left as it is. Fails, naming them, when timeline features fail at these values.
     pub fn snapshot(&self, overrides: &[(String, Override)], options: &Options) -> Result<Snapshot> {
         let tolerance = checked_tolerance(options.tolerance)?;
-        let doc = self.with_overrides(overrides)?;
-        let state = {
-            let mut model = self.model.lock().unwrap_or_else(|e| e.into_inner());
-            model.evaluate(&doc);
-            let failed: Vec<String> = model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{}: {e}", r.name))).collect();
-            if !failed.is_empty() {
-                return Err(Error::Evaluation(failed));
-            }
-            model.state()
-        };
+        let mut doc = self.with_overrides(overrides)?;
+        let edits = self.apply_edits(&mut doc, &options.edits)?;
+        let state = self.evaluate(&doc)?;
         let world = solidcraft_doc::world_state(&doc, &state);
         if let Some(wanted) = &options.bodies {
             if wanted.len() > MAX_BODIES {
@@ -228,14 +278,108 @@ impl Design {
         if chosen.len() > MAX_BODIES {
             return Err(Error::Limit(format!("{} bodies, over {MAX_BODIES}", chosen.len())));
         }
-        let mut budget = Budget { faces: MAX_FACES, triangles: MAX_TRIANGLES };
+        let mut budget = Budget { faces: MAX_FACES, triangles: MAX_TRIANGLES, control_points: MAX_CONTROL_POINTS };
         let mut bodies = Vec::with_capacity(chosen.len());
         for b in chosen {
             bodies.push(body_of(&doc, b, tolerance, &mut budget)?);
         }
         let used: BTreeSet<&str> = bodies.iter().filter_map(|b| b.material.as_deref()).collect();
         let materials = used.into_iter().map(|m| material_of(&doc, m)).collect();
-        Ok(Snapshot { schema: SCHEMA, unit: "mm".into(), design: doc.name.clone(), parameters: parameters_of(&doc), materials, bodies })
+        let features = features::features_of(&doc, &state, &bodies);
+        Ok(Snapshot {
+            schema: SCHEMA,
+            unit: "mm".into(),
+            design: doc.name.clone(),
+            parameters: parameters_of(&doc),
+            materials,
+            bodies,
+            features,
+            edits,
+        })
+    }
+
+    /// The design's model at `doc`, refused when a timeline feature fails.
+    fn evaluate(&self, doc: &Document) -> Result<std::sync::Arc<solidcraft_doc::ModelState>> {
+        let mut model = self.model.lock().unwrap_or_else(|e| e.into_inner());
+        model.evaluate(doc);
+        let failed: Vec<String> = model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{}: {e}", r.name))).collect();
+        if !failed.is_empty() {
+            return Err(Error::Evaluation(failed));
+        }
+        Ok(model.state())
+    }
+
+    /// `edits` made to `doc`, in order: suppressions set on their features, partitions and face
+    /// splits added as features at the end of the timeline (each from the model as the edits
+    /// before it left it).
+    fn apply_edits(&self, doc: &mut Document, edits: &[Edit]) -> Result<Vec<AppliedEdit>> {
+        if edits.len() > MAX_EDITS {
+            return Err(Error::Limit(format!("{} edits, over {MAX_EDITS}", edits.len())));
+        }
+        let mut applied = Vec::with_capacity(edits.len());
+        for edit in edits {
+            match edit {
+                Edit::Suppress(id) => {
+                    let f = doc.feature_mut(*id).ok_or_else(|| Error::Invalid(format!("suppress: the design has no feature F{id}")))?;
+                    f.suppressed = true;
+                    applied.push(AppliedEdit { kind: "suppress".into(), name: String::new(), features: vec![*id], bodies: Vec::new() });
+                }
+                Edit::Partition { name, point, normal, bodies } => {
+                    let plane = edit_plane("partition", name, *point, *normal)?;
+                    let state = self.evaluate(doc)?;
+                    if let Some(missing) = bodies.iter().find(|b| state.body(b).is_none()) {
+                        return Err(Error::Invalid(format!("partition `{name}`: no body `{missing}`")));
+                    }
+                    let n = solidcraft_geom::Vec3::new(normal[0], normal[1], normal[2]);
+                    let o = solidcraft_geom::Vec3::new(point[0], point[1], point[2]);
+                    let cut: Vec<String> = state
+                        .bodies
+                        .iter()
+                        .filter(|b| bodies.is_empty() || bodies.contains(&b.name))
+                        .filter(|b| {
+                            // The plane crosses the body: its mesh has points on both sides.
+                            let eps = (b.body.size() * 1e-6).max(1e-9);
+                            let side = |p: &solidcraft_geom::Vec3| (*p - o).dot(n);
+                            let m = b.mesh();
+                            m.positions.iter().any(|p| side(p) > eps) && m.positions.iter().any(|p| side(p) < -eps)
+                        })
+                        .map(|b| b.name.clone())
+                        .collect();
+                    let mut features = Vec::with_capacity(cut.len());
+                    for body in &cut {
+                        let kind = solidcraft_doc::FeatureKind::Split {
+                            body: solidcraft_doc::BodyName(body.clone()),
+                            plane: solidcraft_doc::PlaneRef::Custom { plane },
+                            tool: None,
+                            sketch: None,
+                            line: None,
+                        };
+                        let label = if cut.len() > 1 { format!("{name} ({body})") } else { name.clone() };
+                        features.push(doc.add_feature(kind, Some(&label)).map_err(|e| Error::Invalid(format!("partition `{name}`: {e}")))?);
+                    }
+                    applied.push(AppliedEdit { kind: "partition".into(), name: name.clone(), features, bodies: cut });
+                }
+                Edit::SplitFace { name, body, face, point, normal } => {
+                    let plane = edit_plane("split_face", name, *point, *normal)?;
+                    let state = self.evaluate(doc)?;
+                    if state.body(body).is_none() {
+                        return Err(Error::Invalid(format!("split_face `{name}`: no body `{body}`")));
+                    }
+                    let at = solidcraft_doc::naming::named_face_point(&state, Some(body), face)
+                        .map_err(|e| Error::Invalid(format!("split_face `{name}`: {e}")))?;
+                    let kind = solidcraft_doc::FeatureKind::SplitFace {
+                        faces: vec![solidcraft_doc::FacePick(at)],
+                        body: Some(solidcraft_doc::BodyName(body.clone())),
+                        plane: solidcraft_doc::PlaneRef::Custom { plane },
+                        tool: None,
+                        sketch: None,
+                    };
+                    let id = doc.add_feature(kind, Some(name)).map_err(|e| Error::Invalid(format!("split_face `{name}`: {e}")))?;
+                    applied.push(AppliedEdit { kind: "split_face".into(), name: name.clone(), features: vec![id], bodies: vec![body.clone()] });
+                }
+            }
+        }
+        Ok(applied)
     }
 
     /// A copy of the design with the overrides applied, all or none.
@@ -296,10 +440,27 @@ fn checked_tolerance(t: Tolerance) -> Result<Tolerance> {
     }
 }
 
-/// What is left of the snapshot's face and triangle limits.
+/// What is left of the snapshot's face, triangle and control point limits.
 struct Budget {
     faces: usize,
     triangles: usize,
+    control_points: usize,
+}
+
+/// The plane of a partition or face split, refused when its point or normal is not finite, the
+/// normal has no direction, or the name is empty or too long.
+fn edit_plane(kind: &str, name: &str, point: [f64; 3], normal: [f64; 3]) -> Result<solidcraft_geom::Plane> {
+    if name.trim().is_empty() || name.len() > MAX_NAME_BYTES || name.chars().any(char::is_control) {
+        return Err(Error::Invalid(format!("{kind}: a name of 1 to {MAX_NAME_BYTES} bytes without control characters is needed")));
+    }
+    if point.iter().chain(&normal).any(|x| !x.is_finite() || x.abs() > MAX_VALUE) {
+        return Err(Error::Invalid(format!("{kind} `{name}`: the point and normal must be finite")));
+    }
+    let o = solidcraft_geom::Vec3::new(point[0], point[1], point[2]);
+    let n = solidcraft_geom::Vec3::new(normal[0], normal[1], normal[2]);
+    n.normalized()
+        .and_then(|n| solidcraft_geom::Plane::from_normal(o, n))
+        .ok_or_else(|| Error::Invalid(format!("{kind} `{name}`: the normal has no direction")))
 }
 
 fn parameters_of(doc: &Document) -> Vec<Parameter> {
@@ -347,7 +508,8 @@ fn body_of(doc: &Document, b: &ModelBody, tolerance: Tolerance, budget: &mut Bud
         Tolerance::Relative(r) => (b.body.size() * r).max(MIN_TOLERANCE_MM),
         Tolerance::Absolute(a) => a,
     };
-    let mesh = solidcraft_io::tagged_mesh(&b.body, tol).map_err(|e| Error::Invalid(format!("body {}: {e}", b.name)))?;
+    let (mesh, polylines, edge_faces) =
+        solidcraft_io::tagged_mesh_with_edges(&b.body, tol).map_err(|e| Error::Invalid(format!("body {}: {e}", b.name)))?;
     let face_count = mesh.faces as usize;
     if face_count > budget.faces || mesh.triangles.len() > budget.triangles {
         return Err(Error::Limit(format!(
@@ -369,21 +531,46 @@ fn body_of(doc: &Document, b: &ModelBody, tolerance: Tolerance, budget: &mut Bud
         }
     }
     let closed = is_closed(&mesh.triangles);
-    let faces = by_face
-        .into_iter()
-        .enumerate()
-        .map(|(i, triangles)| {
-            let surface = solidcraft_kernel::face_surface(&b.body, i).map(|s| surface_of(s, &positions, &triangles)).unwrap_or_default();
-            Face {
-                index: u32::try_from(i).unwrap_or(u32::MAX),
-                name: names.get(i).cloned().unwrap_or_default(),
-                surface,
-                triangles,
-                attributes: Default::default(),
-            }
-        })
-        .collect();
-    Ok(Body { name: b.name.clone(), material: assigned_material(doc, b), closed, positions, faces, attributes: Default::default() })
+    let mut faces = Vec::with_capacity(face_count);
+    for (i, triangles) in by_face.into_iter().enumerate() {
+        let surface = match solidcraft_kernel::face_surface(&b.body, i) {
+            Some(s) => surface_of(s, &positions, &triangles),
+            None => match solidcraft_kernel::face_nurbs(&b.body, i) {
+                Some(n) => {
+                    let count = n.points.iter().map(Vec::len).sum::<usize>();
+                    if count > budget.control_points {
+                        return Err(Error::Limit(format!("body {} brings the snapshot over {MAX_CONTROL_POINTS} NURBS control points", b.name)));
+                    }
+                    budget.control_points -= count;
+                    Surface::Nurbs {
+                        degree_u: u32::try_from(n.degree_u).unwrap_or(u32::MAX),
+                        degree_v: u32::try_from(n.degree_v).unwrap_or(u32::MAX),
+                        knots_u: n.knots_u,
+                        knots_v: n.knots_v,
+                        points: n.points.iter().map(|row| row.iter().map(|p| v3(*p)).collect()).collect(),
+                        weights: n.weights,
+                    }
+                }
+                None => Surface::Other,
+            },
+        };
+        let name = names.get(i).cloned().unwrap_or_default();
+        faces.push(Face {
+            index: u32::try_from(i).unwrap_or(u32::MAX),
+            features: features::feature_ids(&name),
+            name,
+            surface,
+            triangles,
+            attributes: Default::default(),
+        });
+    }
+    let close = (b.body.size() * 1e-6).max(1e-7);
+    let index = topology::PointIndex::new(&positions, close);
+    let edge_names = solidcraft_doc::naming::edge_names(b);
+    let edges = topology::edges_of(&b.body, &polylines, &edge_faces, &edge_names, &positions, &mesh.triangles, &mesh.tri_faces, &index, tol);
+    let face_names: Vec<String> = faces.iter().map(|f| f.name.clone()).collect();
+    let vertices = topology::vertices_of(&edges, &face_names, &index, close);
+    Ok(Body { name: b.name.clone(), material: assigned_material(doc, b), closed, positions, faces, attributes: Default::default(), edges, vertices })
 }
 
 /// Every edge used once in each direction: a closed, consistently oriented mesh.

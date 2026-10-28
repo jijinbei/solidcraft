@@ -37,6 +37,12 @@ pub struct Snapshot {
     pub materials: Vec<Material>,
     /// The bodies, placed in world coordinates, in the design's order.
     pub bodies: Vec<Body>,
+    /// The timeline's modelling features (sketches and construction geometry left out), in
+    /// timeline order, suppressed ones included.
+    pub features: Vec<Feature>,
+    /// The edits the snapshot was taken with ([`crate::Edit`]), in the order given, each with
+    /// the feature it became.
+    pub edits: Vec<AppliedEdit>,
 }
 
 /// One parameter of the design: a user parameter, a sketch dimension or a feature input.
@@ -137,6 +143,176 @@ pub struct Body {
     pub faces: Vec<Face>,
     /// Key/value data for downstream tools (empty for now).
     pub attributes: BTreeMap<String, String>,
+    /// The body's B-rep edges, in the body's own edge order.
+    pub edges: Vec<Edge>,
+    /// The body's corners: where edges end.
+    pub vertices: Vec<Vertex>,
+}
+
+/// One B-rep edge of a body.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct Edge {
+    /// The edge's place in the body's edge order.
+    pub index: u32,
+    /// The edge's persistent name: the names of the faces it bounds (`F1:-z|F2:side`), numbered
+    /// `~k` when several edges share them.
+    pub name: String,
+    /// The faces it bounds ([`Face::index`]): two, or one for a seam.
+    pub faces: Vec<u32>,
+    pub curve: Curve,
+    /// The edge as a polyline within the snapshot's chord tolerance, start to end.
+    pub points: Vec<[f64; 3]>,
+    /// The mesh vertices along the edge, in order ([`Body::positions`] indices): the triangle
+    /// sides that run along it. Empty when the mesh does not trace it as one chain (a seam).
+    pub path: Vec<u32>,
+}
+
+/// The exact curve an edge lies on.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum Curve {
+    Line {
+        start: [f64; 3],
+        end: [f64; 3],
+    },
+    /// A circle or an arc of one: the edge runs counter-clockwise about `axis` through `angle`
+    /// radians (2π for a whole circle).
+    Circle {
+        center: [f64; 3],
+        axis: [f64; 3],
+        radius: f64,
+        angle: f64,
+    },
+    /// Any other curve, or a kind this version does not know.
+    #[default]
+    #[serde(other)]
+    Other,
+}
+
+/// A corner of a body.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct Vertex {
+    /// The names of the faces that meet there (`F1:-x|F1:-y|F1:-z`), numbered `~k` when several
+    /// corners share them.
+    pub name: String,
+    pub point: [f64; 3],
+    /// The mesh vertex at the corner ([`Body::positions`] index).
+    pub position: Option<u32>,
+    /// The edges that end there ([`Edge::index`]).
+    pub edges: Vec<u32>,
+}
+
+/// One modelling feature of the timeline.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct Feature {
+    /// The feature's id: `F<id>` in persistent names.
+    pub id: u64,
+    pub name: String,
+    /// `extrude`, `revolve`, `box`, `cylinder`, `hole`, `fillet`, `chamfer`, `shell`, `pattern`, …
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub suppressed: bool,
+    /// `new_body`, `join`, `cut` or `intersect`, for features that have one.
+    pub operation: Option<String>,
+    /// The numeric inputs, evaluated, by snake-case label (`distance`, `radius`, …): lengths in
+    /// mm, angles in radians, counts and factors as numbers.
+    pub values: BTreeMap<String, f64>,
+    /// The keys of `values` that are lengths.
+    pub lengths: Vec<String>,
+    /// Where a primitive or hole sits (a box's corner, a cylinder's base, a hole's position).
+    pub placement: Option<[f64; 3]>,
+    /// The direction it builds along: an extrude's (the sketch normal, flipped for a negative
+    /// extrude), a cylinder's axis, a hole's drilling direction.
+    pub direction: Option<[f64; 3]>,
+    /// An extrude in both directions.
+    pub two_sided: bool,
+    /// The sketch it takes its profiles from, with those profiles.
+    pub sketch: Option<Sketch>,
+    /// A pattern's or mirror's copies: each copy's 4×4 transform, row-major, the identity left out.
+    pub transforms: Vec<[[f64; 4]; 4]>,
+    /// The bodies it changes (a join's, cut's or fillet's), a combine's target.
+    pub targets: Vec<String>,
+    /// A combine's tool bodies.
+    pub tools: Vec<String>,
+    /// The names it gives the bodies it makes.
+    pub creates: Vec<String>,
+    /// The snapshot's bodies it made or shaped faces of, or names.
+    pub bodies: Vec<String>,
+}
+
+/// A sketch and the closed profiles a feature uses from it (sketch coordinates, mm).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct Sketch {
+    pub id: u64,
+    pub name: String,
+    pub origin: [f64; 3],
+    pub x_dir: [f64; 3],
+    pub y_dir: [f64; 3],
+    pub normal: [f64; 3],
+    pub profiles: Vec<Profile>,
+}
+
+/// A closed profile: its outer loop and holes.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct Profile {
+    /// Its place in the solved sketch's profile list.
+    pub index: u32,
+    pub area: f64,
+    pub outer: Vec<SketchCurve>,
+    pub holes: Vec<Vec<SketchCurve>>,
+}
+
+/// A curve of a profile loop. A loop of arcs about one centre that closes is one circle.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SketchCurve {
+    Line {
+        a: [f64; 2],
+        b: [f64; 2],
+    },
+    /// From angle `start` through `sweep` radians (counter-clockwise when positive).
+    Arc {
+        center: [f64; 2],
+        radius: f64,
+        start: f64,
+        sweep: f64,
+    },
+    Circle {
+        center: [f64; 2],
+        radius: f64,
+    },
+    /// A spline, conic or other curve, or a kind this version does not know.
+    #[default]
+    #[serde(other)]
+    Other,
+}
+
+/// An edit a snapshot was taken with and the timeline feature it became.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct AppliedEdit {
+    /// `suppress`, `partition` or `split_face`.
+    pub kind: String,
+    /// The edit's name (a partition's or face split's), empty for a suppression.
+    pub name: String,
+    /// The features it is: the one suppressed, or those it added (a partition adds one split per
+    /// body it cuts). Faces it made carry these ids in their names.
+    pub features: Vec<u64>,
+    /// The bodies it cut or split faces of.
+    pub bodies: Vec<String>,
 }
 
 /// One B-rep face of a body and its triangles.
@@ -154,10 +330,12 @@ pub struct Face {
     pub triangles: Vec<[u32; 3]>,
     /// Key/value data for downstream tools (empty for now).
     pub attributes: BTreeMap<String, String>,
+    /// The features that made or shaped the face (the `F<id>`s of its name), in name order.
+    pub features: Vec<u64>,
 }
 
-/// The analytic surface a face lies on. Directions are unit vectors.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// The surface a face lies on. Directions are unit vectors.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Surface {
@@ -188,7 +366,20 @@ pub enum Surface {
         major: f64,
         minor: f64,
     },
-    /// Any other surface (a spline, an imported mesh), or a kind this version does not know.
+    /// A B-spline or NURBS patch: `points[i][j]` with `weights[i][j]` (all 1 for a B-spline)
+    /// over the knots `knots_u` (index i) and `knots_v` (index j), clamped or not;
+    /// ∂S/∂u × ∂S/∂v points out of the material. The face is the part of the patch its edges
+    /// bound.
+    Nurbs {
+        degree_u: u32,
+        degree_v: u32,
+        knots_u: Vec<f64>,
+        knots_v: Vec<f64>,
+        points: Vec<Vec<[f64; 3]>>,
+        weights: Vec<Vec<f64>>,
+    },
+    /// Any other surface (a surface of revolution of a spline, an imported mesh), or a kind this
+    /// version does not know.
     #[default]
     #[serde(other)]
     Other,

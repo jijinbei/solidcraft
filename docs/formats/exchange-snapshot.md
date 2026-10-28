@@ -4,7 +4,7 @@ Schema 1 (2026-10). Crate `solidcraft-exchange` (`crates/exchange`), CLI
 `solidcraft-cli export-snapshot`.
 
 Analysis tools (electromagnetics, structural, CFD) need a design's shape at given parameter
-values, its faces by name and kind, and its materials. They should not depend on SolidCraft's
+values, its faces, edges and corners by name and kind, how it was built, and its materials. They should not depend on SolidCraft's
 kernel or document model, which change often. The exchange snapshot is the one stable boundary
 between them: tools depend on `solidcraft-exchange` alone, or read its JSON.
 
@@ -20,6 +20,19 @@ let snap: Snapshot = design.snapshot(
 let json = solidcraft_exchange::to_json(&snap)?;           // deterministic bytes
 ```
 
+Edits change the design before it is evaluated, on a copy:
+
+```rust
+let options = Options::default().with_edits(vec![
+    Edit::Suppress(4),                                         // rebuild without feature F4
+    Edit::Partition { name: "Mid".into(), point: [30.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0], bodies: vec![] },
+    Edit::SplitFace { name: "Strip".into(), body: "Body1".into(), face: "F1:+z".into(),
+                      point: [15.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0] },
+]);
+// As JSON (`edits_from_json`): [{"suppress": 4}, {"partition": {"name", "point", "normal", "bodies"?}},
+//                               {"split_face": {"name", "body", "face", "point", "normal"}}]
+```
+
 `snapshot` evaluates the timeline with the overrides applied (all or none) and leaves the design
 as it was. Snapshots of one `Design` share an evaluation, so a second snapshot recomputes only
 the features its overrides reach. A feature that fails at those values fails the snapshot, naming
@@ -28,7 +41,7 @@ an expression is what the parameters table takes.
 
 ```text
 solidcraft-cli export-snapshot part.sc --out part.json --param width=30 --param r="1.5 mm" \
-    [--tolerance 0.01 | --relative-tolerance 2e-4] [--body Body1]...
+    [--tolerance 0.01 | --relative-tolerance 2e-4] [--body Body1]... [--suppress F4]... [--edits edits.json]
 ```
 
 ## Content
@@ -52,10 +65,26 @@ solidcraft-cli export-snapshot part.sc --out part.json --param width=30 --param 
         {"index": 0, "name": "F1:-z", "surface": {"type": "plane", "point": [0, 0, 0], "normal": [0, 0, -1]},
          "triangles": [[0, 2, 1], ...], "attributes": {}},
         {"index": 6, "name": "F2:side", "surface": {"type": "cylinder", "origin": [10, 10, -1], "axis": [0, 0, 1], "radius": 3.0},
-         "triangles": [...], "attributes": {}}
+         "triangles": [...], "attributes": {}, "features": [2]}
       ],
-      "attributes": {}
+      "attributes": {},
+      "edges": [
+        {"index": 0, "name": "F1:-x|F1:-z", "faces": [0, 3], "curve": {"type": "line", "start": [0, 0, 0], "end": [0, 20, 0]},
+         "points": [[0, 0, 0], [0, 20, 0]], "path": [0, 5]}
+      ],
+      "vertices": [
+        {"name": "F1:-x|F1:-y|F1:-z", "point": [0, 0, 0], "position": 0, "edges": [0, 4, 8]}
+      ]
     }
+  ],
+  "features": [
+    {"id": 2, "name": "Hole1", "type": "cylinder", "suppressed": false, "operation": "cut",
+     "values": {"radius": 3.0, "height": 12.0}, "lengths": ["radius", "height"],
+     "placement": [10, 10, -1], "direction": [0, 0, 1], "two_sided": false, "sketch": null,
+     "transforms": [], "targets": [], "tools": [], "creates": [], "bodies": ["Body1"]}
+  ],
+  "edits": [
+    {"kind": "partition", "name": "Mid", "features": [3], "bodies": ["Body1"]}
   ]
 }
 ```
@@ -90,7 +119,34 @@ solidcraft-cli export-snapshot part.sc --out part.json --param width=30 --param 
   when parameters change, and its analytic surface: `plane` (`point`, `normal` out of the
   material), `cylinder` (`origin`, `axis`, `radius`), `cone` (`apex`, `axis` into the cone,
   `half_angle`), `sphere` (`center`, `radius`), `torus` (`center`, `axis`, `major`, negative on a
-  spindle torus's inner sheet, `minor`), or `other` (splines, imported meshes).
+  spindle torus's inner sheet, `minor`), `nurbs` (a B-spline or NURBS patch: `degree_u`,
+  `degree_v`, `knots_u`, `knots_v`, control `points[i][j]` and `weights[i][j]`, all 1 for a
+  B-spline; ∂S/∂u × ∂S/∂v points out of the material; the face is the part its edges bound), or
+  `other` (a spline swept round an axis, imported meshes). `features` lists the `F<id>`s of the
+  face's name: the features that made or shaped it.
+- **Edges.** In the body's own edge order, each named after the faces it bounds
+  (`<face A>|<face B>`, sorted, `~k` when several edges share them), with those faces' indices,
+  its exact `curve` (`line` with `start` and `end`; `circle` with `center`, `axis`, `radius` and
+  the `angle` it runs counter-clockwise about the axis, 2π for a whole circle; or `other`), its
+  polyline within the chord tolerance, and its `path`: the mesh vertices along it, in order, so
+  the triangle sides on the edge are known exactly (empty for a seam within one face).
+- **Corners.** Where edges end (a whole circle alone has none): named after the faces that meet
+  there (`~k` when repeated), with the mesh vertex at the point and the edges that end there.
+- **Features.** The timeline's modelling features in order (sketches and construction geometry
+  left out), suppressed ones flagged: `type` (`extrude`, `box`, `cylinder`, `hole`, `fillet`,
+  `chamfer`, `shell`, `pattern`, `mirror`, `split`, …), `operation` (`new_body`, `join`, `cut`,
+  `intersect`), the numeric inputs evaluated by snake-case label (`lengths` names those that are
+  lengths, in mm; angles in radians), `placement` and `direction` where the feature has them,
+  `two_sided` for an extrude both ways, the `sketch` (plane and the profiles used: lines, arcs,
+  circles, `other`), a pattern's or mirror's copy `transforms` (row-major 4×4, identity left
+  out), `targets`, `tools` and `creates` (body names), and `bodies`: the snapshot's bodies it
+  made faces of or names.
+- **Edits.** Each edit the snapshot was taken with, in order: `suppress` (the feature
+  suppressed), `partition` (one split feature per body the plane crosses; a body it misses is
+  left as it is) and `split_face`, with the features they are and the bodies they cut. Faces they
+  make carry those feature ids: a partition's cut faces are `F<id>:section`, a split face's pieces
+  `<face>#[<neighbour>]`. Suppressing a feature that makes a body takes the body away; one a later
+  feature needs fails the snapshot (`Error::Evaluation`).
 - **Attributes.** Key/value maps on bodies and faces for downstream semantics (ports, boundary
   conditions). Designs have no place to store them yet, so they are empty.
 
@@ -105,7 +161,7 @@ solidcraft-cli export-snapshot part.sc --out part.json --param width=30 --param 
 ## Limits and determinism
 
 The design file is at most 256 MB; a snapshot takes at most 1,024 overrides (finite values up to
-10¹², expressions up to 4,096 bytes) and holds at most 100,000 bodies, 1,000,000 faces and
-20,000,000 triangles. A relative tolerance lies in [10⁻⁶, 0.1], an absolute one in
+10¹², expressions up to 4,096 bytes) and 1,024 edits (names up to 256 bytes), and holds at most
+100,000 bodies, 1,000,000 faces, 20,000,000 triangles and 10,000,000 NURBS control points. A relative tolerance lies in [10⁻⁶, 0.1], an absolute one in
 [0.001, 10,000] mm. The same design, overrides and options give the same bytes: fixed body, face
 and triangle order, sorted maps and shortest round-trip numbers (-0 written as 0).

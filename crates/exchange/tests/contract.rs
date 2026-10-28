@@ -266,7 +266,7 @@ fn an_override_changes_the_dimension_and_keeps_the_face_names() {
     assert!((body_volume(&after.bodies[0]) - 1500.0).abs() < 1e-9);
     assert_eq!(bbox(&after.bodies[0]).1, [30.0, 10.0, 5.0]);
     assert_eq!(face_names(&before), face_names(&after));
-    let face_kinds = |s: &Snapshot| s.bodies[0].faces.iter().map(|f| (f.name.clone(), f.surface)).collect::<Vec<_>>();
+    let face_kinds = |s: &Snapshot| s.bodies[0].faces.iter().map(|f| (f.name.clone(), f.surface.clone())).collect::<Vec<_>>();
     // The same face keeps its name and its plane's direction.
     for ((n0, s0), (n1, s1)) in face_kinds(&before).into_iter().zip(face_kinds(&after)) {
         assert_eq!(n0, n1);
@@ -348,7 +348,7 @@ fn json_reads_back_and_tolerates_what_it_does_not_know() {
     // An added field and an unknown surface kind read; a missing field is its default.
     let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
     v["future_field"] = serde_json::json!({"x": 1});
-    v["bodies"][0]["faces"][0]["surface"] = serde_json::json!({"type": "nurbs", "degree": 3});
+    v["bodies"][0]["faces"][0]["surface"] = serde_json::json!({"type": "subdivision", "level": 3});
     v["bodies"][0]["faces"][0]["also_new"] = serde_json::json!(true);
     v["parameters"] = serde_json::json!([{"name": "p", "kind": "complex"}]);
     v["bodies"][0].as_object_mut().unwrap().remove("attributes");

@@ -107,3 +107,33 @@ fn export_snapshot_refuses_what_it_cannot_write() {
     let o = cli().arg("export-snapshot").arg(&design).output().unwrap();
     assert_eq!(o.status.code(), Some(1), "--out is required");
 }
+
+/// `--suppress` rebuilds without the fillet (six planar faces); `--edits` cuts the block in two at
+/// x = 5; a bad edits file fails and writes nothing.
+#[test]
+fn export_snapshot_applies_suppressions_and_edits() {
+    let dir = Scratch::new();
+    let design = dir.design();
+    let out = dir.0.join("plain.json");
+    assert!(export(&design, &out, &[]).status.success());
+    let plain: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    let fillet = plain["features"].as_array().unwrap().iter().find(|f| f["type"] == "fillet").unwrap()["id"].as_u64().unwrap();
+    let out = dir.0.join("sharp.json");
+    let r = export(&design, &out, &["--suppress", &format!("F{fillet}")]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let sharp: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    assert_eq!(sharp["bodies"][0]["faces"].as_array().unwrap().len(), 6);
+    assert_eq!(sharp["edits"][0]["kind"], "suppress");
+    let edits = dir.0.join("edits.json");
+    std::fs::write(&edits, r#"[{"partition": {"name": "Mid", "point": [5, 0, 0], "normal": [1, 0, 0]}}]"#).unwrap();
+    let out = dir.0.join("cut.json");
+    let r = export(&design, &out, &["--edits", edits.to_str().unwrap()]);
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    let cut: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
+    assert_eq!(cut["bodies"].as_array().unwrap().len(), 2);
+    std::fs::write(&edits, r#"[{"explode": 1}]"#).unwrap();
+    let out = dir.0.join("bad.json");
+    assert!(!export(&design, &out, &["--edits", edits.to_str().unwrap()]).status.success());
+    assert!(!export(&design, &out, &["--suppress", "Fx"]).status.success());
+    assert!(!out.exists());
+}
