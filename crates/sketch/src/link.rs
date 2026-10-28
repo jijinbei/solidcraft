@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Aabb2, Vec2, Vec3};
 
-use crate::model::{Curve, CurveKind, Result, Sketch, SketchError, in_range, radius_in_range};
+use crate::model::{Curve, CurveIdx, CurveKind, PointIdx, Result, Sketch, SketchError, in_range, radius_in_range};
 
 /// Points of one link closer than this are merged into one point.
 const MERGE_TOL: f64 = 1e-7;
@@ -601,33 +601,33 @@ impl Sketch {
     }
 
     /// Curves owned by a link, in creation order.
-    pub fn link_curves(&self, id: &str) -> Vec<usize> {
-        self.curves.iter().enumerate().filter(|(_, c)| c.link.as_deref() == Some(id)).map(|(i, _)| i).collect()
+    pub fn link_curves(&self, id: &str) -> Vec<CurveIdx> {
+        self.curves.iter_enumerated().filter(|(_, c)| c.link.as_deref() == Some(id)).map(|(i, _)| i).collect()
     }
 
     /// Points owned by a link, in creation order.
-    pub fn link_points(&self, id: &str) -> Vec<usize> {
-        self.points.iter().enumerate().filter(|(_, p)| p.link.as_deref() == Some(id)).map(|(i, _)| i).collect()
+    pub fn link_points(&self, id: &str) -> Vec<PointIdx> {
+        self.points.iter_enumerated().filter(|(_, p)| p.link.as_deref() == Some(id)).map(|(i, _)| i).collect()
     }
 
     /// Is this curve linked reference geometry?
-    pub fn is_linked_curve(&self, ci: usize) -> bool {
+    pub fn is_linked_curve(&self, ci: CurveIdx) -> bool {
         self.curves.get(ci).is_some_and(|c| c.link.is_some())
     }
 
     /// Is this curve text outline (linked, but drawn like normal geometry)?
-    pub fn is_text_curve(&self, ci: usize) -> bool {
+    pub fn is_text_curve(&self, ci: CurveIdx) -> bool {
         self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.kind == LinkKind::Text)
     }
 
     /// Is the curve's link lost (its reference no longer found)?
-    pub fn is_lost_curve(&self, ci: usize) -> bool {
+    pub fn is_lost_curve(&self, ci: CurveIdx) -> bool {
         self.curves.get(ci).and_then(|c| c.link.as_deref()).and_then(|l| self.link(l)).is_some_and(|l| l.lost)
     }
 
     /// The line of sketch axis `name` (`x` or `y`) when the sketch already has one (see
     /// [`Sketch::sketch_axis_line`]).
-    pub fn sketch_axis_curve(&self, name: &str) -> Option<usize> {
+    pub fn sketch_axis_curve(&self, name: &str) -> Option<CurveIdx> {
         self.links
             .iter()
             .filter(|l| matches!(&l.source, LinkSource::SketchAxis { name: n } if n == name))
@@ -638,7 +638,7 @@ impl Sketch {
     /// construction line on the axis (it stays there and is left out of profiles), shared by
     /// every reference to that axis and added on first use. `None` when `name` is not a sketch
     /// axis.
-    pub fn sketch_axis_line(&mut self, name: &str) -> Result<Option<usize>> {
+    pub fn sketch_axis_line(&mut self, name: &str) -> Result<Option<CurveIdx>> {
         let Some(geom) = sketch_axis_geom(name) else { return Ok(None) };
         if let Some(c) = self.sketch_axis_curve(name) {
             return Ok(Some(c));
@@ -663,7 +663,7 @@ impl Sketch {
         if lay.curves.is_empty() || !lay.lone.is_empty() {
             return false;
         }
-        let at = |i: usize| self.points.get(i).map(|p| p.pos);
+        let at = |i: PointIdx| self.points.get(i).map(|p| p.pos);
         let near = |i: usize, q: Option<Vec2>| lay.pts.get(i).zip(q).is_some_and(|(p, q)| p.dist(q) <= MERGE_TOL);
         let curve_present = |c: &LCurve| {
             self.curves.iter().filter(|k| k.link.is_some()).any(|k| match (*c, &k.kind) {
@@ -693,8 +693,8 @@ impl Sketch {
     }
 
     fn build_link(&mut self, id: &str, lay: &Layout) -> Result<()> {
-        let mut idx: Vec<Option<usize>> = vec![None; lay.pts.len()];
-        let mut point = |sk: &mut Sketch, li: usize| -> Result<usize> {
+        let mut idx: Vec<Option<PointIdx>> = vec![None; lay.pts.len()];
+        let mut point = |sk: &mut Sketch, li: usize| -> Result<PointIdx> {
             if let Some(Some(i)) = idx.get(li) {
                 return Ok(*i);
             }
@@ -766,7 +766,8 @@ impl Sketch {
         let curves = self.link_curves(id);
         let points = self.link_points(id);
         // Current layout of the link, in the same terms.
-        let local = |p: usize| points.iter().position(|q| *q == p);
+        let local = |p: PointIdx| points.iter().position(|q| *q == p);
+
         let cur: Option<Vec<LCurve>> = curves
             .iter()
             .map(|ci| match self.curves.get(*ci).map(|c| &c.kind) {
@@ -870,7 +871,7 @@ impl Sketch {
         // The same geometry walked in another order or direction (e.g. a face loop re-read after
         // a rollback) is not a change: keep the entities, and the constraints on them.
         if let Some(cur) = &cur {
-            let pos = |pi: usize| self.points.get(pi).map(|p| p.pos);
+            let pos = |pi: PointIdx| self.point(pi);
             let old: Option<Vec<(LCurve, Vec<Vec2>)>> = cur
                 .iter()
                 .map(|c| curve_points(c).into_iter().map(|li| points.get(li).and_then(|pi| pos(*pi))).collect::<Option<Vec<_>>>().map(|ps| (*c, ps)))

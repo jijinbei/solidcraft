@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
+use solidcraft_sketch::{CurveIdx, PointIdx};
 
 use crate::Session;
 
@@ -181,10 +182,10 @@ fn auto_constrain_dimensions_construction_curves_without_moving_them() {
                 assert_eq!(a.id, b.id);
                 assert!(b.construction);
             }
-            for (i, _) in before.points.iter().enumerate() {
+            for i in before.points.indices() {
                 assert!(before.point(i).unwrap().dist(after.point(i).unwrap()) < 1e-6);
             }
-            for i in 0..before.curves.len() {
+            for i in before.curves.indices() {
                 if let Some(radius) = before.radius(i) {
                     assert!((radius - after.radius(i).unwrap()).abs() < 1e-6);
                 }
@@ -225,7 +226,7 @@ fn internal_freedom_queries_skip_redundancy_and_keep_constraint_acceptance() {
 
     let mut sk = Sketch::new();
     let q = sk.add_point(Vec2::new(10.0, 2.0), None).unwrap();
-    let k = ConstraintKind::Distance { p: 0, q, value: 10.0 };
+    let k = ConstraintKind::Distance { p: PointIdx::ORIGIN, q, value: 10.0 };
     sk.add_constraint(k.clone(), None).unwrap();
     let redundant = sk.add_constraint(k.clone(), None).unwrap();
     let (dof, profile) = capture(|| super::dof_now(&sk));
@@ -239,7 +240,8 @@ fn internal_freedom_queries_skip_redundancy_and_keep_constraint_acceptance() {
     assert_eq!(sk, before);
     assert_eq!(profile.counters.redundancy_checks, 0);
 
-    let (accepted, profile) = capture(|| super::try_add(&mut sk, &mut doc, ConstraintKind::DistanceX { p: 0, q, value: 6.0 }, dof, false));
+    let (accepted, profile) =
+        capture(|| super::try_add(&mut sk, &mut doc, ConstraintKind::DistanceX { p: PointIdx::ORIGIN, q, value: 6.0 }, dof, false));
     assert_eq!(accepted, Some(0));
     assert_eq!(profile.counters.redundancy_checks, 0);
     let full = solidcraft_sketch::solve(&mut sk);
@@ -301,7 +303,7 @@ fn a_radius_dimension_switches_to_a_diameter_and_back() {
     assert_eq!(r["diameter"], false, "{r}");
     assert!(matches!(dim(&s, &p1).kind, ConstraintKind::Radius { value, .. } if (value - 10.0).abs() < 1e-9), "{:?}", dim(&s, &p1).kind);
     assert_eq!(s.doc.param(&p1).unwrap().expr, "10 mm");
-    assert!((sketch(&s).radius(0).unwrap() - 10.0).abs() < 1e-9, "the circle keeps its size");
+    assert!((sketch(&s).radius(CurveIdx(0)).unwrap() - 10.0).abs() < 1e-9, "the circle keeps its size");
     // Asking for what it already is changes nothing; then back to the diameter.
     let r = run(&mut s, "sketch.toggle_diameter", json!({"constraint": did, "diameter": false}));
     assert_eq!(r["diameter"], false, "{r}");
@@ -316,7 +318,7 @@ fn a_radius_dimension_switches_to_a_diameter_and_back() {
     let d2 = dim(&s, &p2).id;
     run(&mut s, "sketch.toggle_diameter", json!({"constraint": d2}));
     assert_eq!(s.doc.param(&p2).unwrap().expr, "(w) / 2");
-    assert!((sketch(&s).radius(1).unwrap() - 15.0).abs() < 1e-6, "{:?}", sketch(&s).radius(1));
+    assert!((sketch(&s).radius(CurveIdx(1)).unwrap() - 15.0).abs() < 1e-6, "{:?}", sketch(&s).radius(CurveIdx(1)));
 
     // Another user of the parameter would change size with it: refused, nothing changes.
     run(&mut s, "parameters.add", json!({"name": "k", "expression": format!("{p1} + 1 mm")}));
@@ -328,7 +330,7 @@ fn a_radius_dimension_switches_to_a_diameter_and_back() {
     // An arc's driven radius becomes its driven diameter; a line's length is no radius.
     let a = ids(&run(&mut s, "sketch.arc.center_point", json!({"center": [0, 80], "start": [20, 80], "sweep": 90}))["curves"])[0].clone();
     run(&mut s, "sketch.dimension", json!({"entities": [a], "driven": true}));
-    let arc = sketch(&s).curves.iter().position(|c| c.id == a).unwrap();
+    let arc = sketch(&s).curve_index(&a).unwrap();
     let driven = sketch(&s).constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Radius { c, .. } if c == arc)).unwrap().clone();
     assert!(driven.driven && driven.param.is_none());
     run(&mut s, "sketch.toggle_diameter", json!({"constraint": driven.id}));
@@ -411,7 +413,7 @@ fn drawing_at_a_curve_crossing_keeps_the_point_on_both() {
     let start = sk.resolve_point(&format!("{n}.start")).unwrap();
     let ia = sk.curve_index(&a).unwrap();
     let ib = sk.curve_index(&b).unwrap();
-    let on = |c: usize| {
+    let on = |c: CurveIdx| {
         sk.constraints.iter().any(|k| matches!(k.kind, crate::sketch::ConstraintKind::PointOnCurve { p, c: curve } if p == start && curve == c))
     };
     assert!(on(ia) && on(ib), "{:?}", sk.constraints);
@@ -878,7 +880,7 @@ fn midpoint_alignment_remaps_after_unrelated_geometry_is_deleted() {
     let helper = sk.point(sk.resolve_point(result["created"]["points"][0].as_str().unwrap()).unwrap()).unwrap();
     assert!(helper.dist(line_midpoint(&sk, "l2")) < 1e-6);
     assert!((sk.point(sk.resolve_point("target").unwrap()).unwrap().x - helper.x).abs() < 1e-6);
-    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l: 0, .. })));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { l: CurveIdx(0), .. })));
     // Deleting the helper itself removes its H/V and Midpoint relationships.
     run(&mut s, "sketch.delete", json!({"entities":[result["created"]["points"][0]]}));
     assert!(sketch(&s).constraints.is_empty());

@@ -9,7 +9,7 @@
 
 use solidcraft_geom::Vec2;
 
-use crate::model::{ConstraintKind, CurveKind, Result, Sketch, SketchError};
+use crate::model::{ConstraintKind, CurveIdx, CurveKind, PointIdx, Result, Sketch, SketchError};
 
 /// Closer than this (relative to the spline's size) to one of its points, a new point would
 /// double it.
@@ -20,7 +20,7 @@ impl Sketch {
     /// index. The point lies on the curve, which still runs through it and through all its old
     /// points; between them the curve shifts slightly, as interpolation through one more point
     /// does.
-    pub fn insert_spline_point(&mut self, ci: usize, at: Vec2) -> Result<usize> {
+    pub fn insert_spline_point(&mut self, ci: CurveIdx, at: Vec2) -> Result<PointIdx> {
         let pts = self.editable_spline(ci)?;
         if !at.is_finite() {
             return Err(SketchError::Invalid("the position must be finite".into()));
@@ -54,7 +54,7 @@ impl Sketch {
     /// index: the curve runs on from its old end through it. The old end becomes an inner point,
     /// so it must not be joined to anything (another curve, or a constraint on that point or a
     /// tangency of the spline).
-    pub fn extend_spline(&mut self, ci: usize, to: Vec2, at_start: bool) -> Result<usize> {
+    pub fn extend_spline(&mut self, ci: CurveIdx, to: Vec2, at_start: bool) -> Result<PointIdx> {
         let pts = self.editable_spline(ci)?;
         if matches!(self.curves.get(ci).map(|c| &c.kind), Some(CurveKind::Spline { periodic: true, .. })) {
             return Err(SketchError::Invalid("a closed spline has no end to extend".into()));
@@ -63,7 +63,7 @@ impl Sketch {
             return Err(SketchError::Invalid("the position must be finite".into()));
         }
         let end = if at_start { pts.first() } else { pts.last() }.copied().ok_or_else(|| SketchError::Invalid("empty spline".into()))?;
-        let joined = self.curves.iter().enumerate().any(|(i, c)| i != ci && c.kind.uses(end))
+        let joined = self.curves.iter_enumerated().any(|(i, c)| i != ci && c.kind.uses(end))
             || self.constraints.iter().any(|k| {
                 let (points, curves) = k.kind.indices();
                 points.contains(&end) || (curves.contains(&ci) && matches!(k.kind, ConstraintKind::Tangent { .. } | ConstraintKind::Smooth { .. }))
@@ -87,7 +87,7 @@ impl Sketch {
     }
 
     /// The points of spline `ci`, when it may take another one.
-    fn editable_spline(&self, ci: usize) -> Result<Vec<usize>> {
+    fn editable_spline(&self, ci: CurveIdx) -> Result<Vec<PointIdx>> {
         let curve = self.curves.get(ci).ok_or_else(|| SketchError::Unknown(format!("curve {ci}")))?;
         let CurveKind::Spline { pts, control, .. } = &curve.kind else {
             return Err(SketchError::WrongKind(curve.id.clone(), "only a spline takes another point".into()));

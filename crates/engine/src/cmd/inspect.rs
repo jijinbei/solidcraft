@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 
 use serde_json::{Value, json};
-use solidcraft_sketch::CurveKind;
+use solidcraft_sketch::{CurveKind, PointIdx};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
@@ -184,11 +184,10 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
     let sk = &ss.sketch;
     let curves: Vec<Value> = sk
         .curves
-        .iter()
-        .enumerate()
+        .iter_enumerated()
         .map(|(i, c)| {
-            let det = ss.report.curve_determined.get(i).copied().unwrap_or(false);
-            let pid = |k: usize| sk.points.get(k).map(|p| p.id.clone()).unwrap_or_default();
+            let det = ss.report.curve_determined.get(i.0).copied().unwrap_or(false);
+            let pid = |k: PointIdx| sk.points.get(k).map(|p| p.id.clone()).unwrap_or_default();
             let mut v = match c.kind {
                 CurveKind::Line { a, b } => json!({"id": c.id, "type": "line", "start": pid(a), "end": pid(b), "start_at": sk.point(a), "end_at": sk.point(b), "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
                 CurveKind::Circle { c: cc, r } => json!({"id": c.id, "type": "circle", "center": pid(cc), "center_at": sk.point(cc), "radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),

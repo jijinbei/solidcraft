@@ -315,7 +315,7 @@ mod tests {
     fn distance(x: f64) -> Sketch {
         let mut sk = Sketch::new();
         let q = sk.add_point(Vec2::new(x, 0.0), None).unwrap();
-        sk.add_constraint(ConstraintKind::Distance { p: 0, q, value: 10.0 }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Distance { p: crate::PointIdx::ORIGIN, q, value: 10.0 }, None).unwrap();
         sk
     }
 
@@ -325,7 +325,7 @@ mod tests {
             let mut plain = distance(x);
             if stalled {
                 // Horizontal distances retain the magnitude residual and its zero slope.
-                plain.constraints[0].kind = ConstraintKind::DistanceX { p: 0, q: 1, value: 10.0 };
+                plain.constraints[0].kind = ConstraintKind::DistanceX { p: crate::PointIdx::ORIGIN, q: crate::PointIdx(1), value: 10.0 };
             }
             let mut measured = plain.clone();
             let run = |sk: &mut Sketch| solve_with(sk, &Hold::default(), None, Analysis::StatusOnly, None);
@@ -361,7 +361,7 @@ mod tests {
     #[test]
     fn freedom_and_status_queries_do_not_run_dependency_analysis() {
         let mut sk = distance(10.0);
-        sk.add_constraint(ConstraintKind::Distance { p: 0, q: 1, value: 10.0 }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Distance { p: crate::PointIdx::ORIGIN, q: crate::PointIdx(1), value: 10.0 }, None).unwrap();
         for analysis in [Analysis::Full, Analysis::Freedom, Analysis::StatusOnly] {
             let (report, profile) =
                 crate::construct::switch::without_differential(|| capture(|| solve_with(&mut sk.clone(), &Hold::default(), None, analysis, None)));

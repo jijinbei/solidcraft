@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
-use solidcraft_sketch::{ConstraintKind, CurveKind};
+use solidcraft_sketch::{ConstraintKind, CurveIdx, CurveKind, PointIdx};
 
 use crate::Session;
 
@@ -57,7 +57,7 @@ fn explicit_freeform_break_preserves_exact_geometry_and_undo() {
         let out = run(&mut s, "sketch.break", json!({"curve": id, "points": [b, a, a]}));
         assert!(ids(&out["curves"]).len() >= 3, "{command}: {out}");
         let after = sketch(&s);
-        let segs: Vec<_> = after.curves.iter().enumerate().flat_map(|(i, _)| after.exact_segs(i).unwrap_or_default()).collect();
+        let segs: Vec<_> = after.curves.iter_enumerated().flat_map(|(i, _)| after.exact_segs(i).unwrap_or_default()).collect();
         for old in &exact {
             for k in 0..=40 {
                 let q = old.point_at(k as f64 / 40.0);
@@ -194,12 +194,12 @@ fn exact_extend_ellipse_preserves_support_target_and_history() {
         run(&mut s, "sketch.constraint.fix", json!({"entity":ellipse}));
         let line = ids(&run(&mut s, "sketch.line", json!({"points":[[0,y],[5,y]],"connect":false,"infer":false}))["curves"])[0].clone();
         let before = s.doc.to_json();
-        let target = sketch(&s).exact_segs(0).unwrap();
+        let target = sketch(&s).exact_segs(CurveIdx(0)).unwrap();
         run(&mut s, "sketch.extend", json!({"curve":line,"at":[5,y]}));
         let sk = sketch(&s);
         let end = sk.point(sk.resolve_point(&format!("{line}.end")).unwrap()).unwrap();
         assert!(end.dist(Vec2::new(expected_x, y)) < 1e-7, "exact ellipse contact {end:?}");
-        assert_eq!(sk.exact_segs(0).unwrap(), target);
+        assert_eq!(sk.exact_segs(CurveIdx(0)).unwrap(), target);
         let persisted = s.doc.to_json();
         let reopened = solidcraft_doc::format::read(&persisted).unwrap();
         assert_eq!(reopened.to_json(), persisted);
@@ -227,7 +227,7 @@ fn exact_extend_arc_closes_round_a_cutter_inside_its_own_sweep() {
     assert!(matches!(sk.shape(ci), Some(solidcraft_sketch::Shape::Round { sweep, .. }) if (sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-9));
     // ...and a new arc runs from its far end back round to close the circle.
     assert_eq!(sk.curves.len(), before.curves.len() + 1);
-    let sh = sk.shape(sk.curves.len() - 1).expect("the closing arc");
+    let sh = sk.shape(CurveIdx(sk.curves.len() - 1)).expect("the closing arc");
     assert!(matches!(sh, solidcraft_sketch::Shape::Round { sweep, .. } if (sweep - 3.0 * std::f64::consts::FRAC_PI_2).abs() < 1e-9), "{sh:?}");
     assert!(sh.dist(Vec2::new(10.0, 0.0)) < 1e-6 && sh.dist(Vec2::new(0.0, 10.0)) < 1e-6, "{sh:?}");
 }
@@ -269,7 +269,7 @@ fn arc_extend_grows_a_free_end_in_place_to_the_first_geometry() {
     cut(&mut s, 200.0);
     cut(&mut s, 260.0);
     let before = sketch(&s);
-    let round = |sk: &solidcraft_sketch::Sketch, ci: usize| match sk.shape(ci) {
+    let round = |sk: &solidcraft_sketch::Sketch, ci: CurveIdx| match sk.shape(ci) {
         Some(solidcraft_sketch::Shape::Round { start, sweep, .. }) => (start.to_degrees(), sweep.to_degrees()),
         other => panic!("{other:?}"),
     };
@@ -316,7 +316,9 @@ fn arc_extend_joins_an_end_that_already_carries_geometry_with_a_new_arc() {
     // The end the line starts at stays where it is, so the arc keeps its geometry...
     assert!(matches!(sk.shape(ci).unwrap(), solidcraft_sketch::Shape::Round { sweep, .. } if (sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-9));
     // ...and the extension is a new arc from that end to the circle's crossing.
-    let grown = (0..sk.curves.len())
+    let grown = sk
+        .curves
+        .indices()
         .find(|i| sk.curves[*i].id != arc && sk.curves[*i].id != line && matches!(sk.curves[*i].kind, CurveKind::Arc { .. }))
         .expect("a new arc");
     let sh = sk.shape(grown).unwrap();
@@ -336,7 +338,7 @@ fn arc_extend_closes_the_gap_onto_the_arcs_own_far_end() {
     let sk = sketch(&s);
     let ci = sk.curve_index(&arc).unwrap();
     assert!(matches!(sk.shape(ci).unwrap(), solidcraft_sketch::Shape::Round { sweep, .. } if (sweep - std::f64::consts::FRAC_PI_2).abs() < 1e-9));
-    let closed = (0..sk.curves.len()).find(|i| *i != ci && matches!(sk.curves[*i].kind, CurveKind::Arc { .. })).expect("a new arc");
+    let closed = sk.curves.indices().find(|i| *i != ci && matches!(sk.curves[*i].kind, CurveKind::Arc { .. })).expect("a new arc");
     let sh = sk.shape(closed).unwrap();
     assert!(sh.dist(Vec2::new(0.0, 10.0)) < 1e-6 && sh.dist(Vec2::new(10.0, 0.0)) < 1e-6, "{sh:?}");
     assert!(matches!(sh, solidcraft_sketch::Shape::Round { sweep, .. } if (sweep - 3.0 * std::f64::consts::FRAC_PI_2).abs() < 1e-9), "{sh:?}");
@@ -420,7 +422,7 @@ fn extend_with_nothing_in_the_way_adds_the_line_the_preview_shows() {
     run(&mut s, "sketch.extend", json!({"curve": lines[0], "at": [10.0, 0.0]}));
     let sk = sketch(&s);
     assert_eq!(sk.curves.len(), 3);
-    let added = sk.curves.len() - 1;
+    let added = CurveIdx(sk.curves.len() - 1);
     assert!(sk.shape(added).is_some_and(|sh| sh.dist(Vec2::new(60.0, 0.0)) < 1e-6), "{added}");
     assert!(sk.shape(ci).is_some_and(|sh| sh.dist(Vec2::new(10.0, 0.0)) < 1e-6), "the line being extended stays put");
 }
@@ -447,7 +449,10 @@ fn line_extend_joins_a_stop_that_is_another_curves_end() {
     let sk = sketch(&s);
     assert_eq!(sk.curves.len(), curves + 1, "the extension is a new line");
     assert_eq!(sk.points.len(), points, "the extension joins the point that is there");
-    assert!(matches!(sk.curves[sk.curves.len() - 1].kind, CurveKind::Line { b, .. } if b == stop), "the new line ends on the existing point");
+    assert!(
+        matches!(sk.curves[CurveIdx(sk.curves.len() - 1)].kind, CurveKind::Line { b, .. } if b == stop),
+        "the new line ends on the existing point"
+    );
 
     // A free end moves onto the point that is there, and is held to it instead of doubling it.
     let mut s = new_sketch();
@@ -698,7 +703,7 @@ fn move_rotation_turns_axis_constraints() {
                 };
                 assert_eq!(measured, expected, "{at}");
                 if copy {
-                    assert_eq!(&after.points[..before.points.len()], before.points.as_slice(), "{at}");
+                    assert_eq!(&after.points.as_slice()[..before.points.len()], before.points.as_slice(), "{at}");
                     assert_eq!(&after.constraints[..before.constraints.len()], before.constraints.as_slice(), "{at}");
                 }
             }
@@ -786,12 +791,13 @@ fn a_tangent_arc_starts_from_a_trimmed_end() {
     let sk = sketch(&s);
     let picked = sk.resolve_point("guide_a.end").unwrap();
     assert!(sk.point(picked).unwrap().dist(Vec2::new(10.0, 0.0)) < 1e-6);
-    let trimmed = sk.curves.iter().position(|cu| !cu.construction && matches!(cu.kind, CurveKind::Arc { .. })).expect("the trimmed arc");
+    let trimmed =
+        sk.curves.iter().position(|cu| !cu.construction && matches!(cu.kind, CurveKind::Arc { .. })).map(CurveIdx).expect("the trimmed arc");
     let r = run(&mut s, "sketch.arc.tangent", json!({"start": "guide_a.end", "end": [14, 6]}));
     let sk = sketch(&s);
     let a = sk.curve_index(&ids(&r["curves"])[0]).unwrap();
-    let a_ends: Vec<usize> = sk.curves[a].kind.point_ids();
-    let t_ends: Vec<usize> = sk.curves[trimmed].kind.point_ids();
+    let a_ends: Vec<PointIdx> = sk.curves[a].kind.point_ids();
+    let t_ends: Vec<PointIdx> = sk.curves[trimmed].kind.point_ids();
     assert!(a_ends.iter().any(|q| t_ends.contains(q) && *q != picked), "the new arc shares the trimmed arc's own end");
     assert!(
         sk.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::Tangent { a: x, b: y } if (x, y) == (trimmed, a) || (x, y) == (a, trimmed))),
@@ -1551,16 +1557,16 @@ fn irregular_closed_spline_offset_certificate_edits_undoes_and_reopens() {
     let result = run(&mut s, "sketch.offset", json!({"curves":["s1"],"distance":2.0,"chain":true}));
     let output = result["curves"][0].as_str().unwrap().to_string();
     let parameter = result["param"].as_str().unwrap().to_string();
-    let point_ids = sketch(&s).curves[1].kind.point_ids();
+    let point_ids = sketch(&s).curves[CurveIdx(1)].kind.point_ids();
     let verify = |s: &Session, distance: f64| {
         let state = s.world_state();
         let sk = &state.sketch(1).unwrap().sketch;
-        assert_eq!(sk.curves[0], original.curves[0]);
-        assert_eq!(&sk.points[..original.points.len()], &original.points);
+        assert_eq!(sk.curves.first(), original.curves.first());
+        assert_eq!(&sk.points.as_slice()[..original.points.len()], original.points.as_slice());
         let index = sk.curve_index(&output).unwrap();
         assert_eq!(sk.curves[index].kind.point_ids(), point_ids);
         assert!(matches!(sk.curves[index].kind, CurveKind::Spline { periodic: true, .. }));
-        let exact = sk.exact_segs(0).unwrap();
+        let exact = sk.exact_segs(CurveIdx(0)).unwrap();
         let fitted = sk.exact_segs(index).unwrap();
         let mut max_error = 0.0_f64;
         for curve in &fitted {
@@ -1679,7 +1685,7 @@ fn periodic_closed_offset_chain_break_drag_reopen_and_material_volume() {
     let a = run(&mut s, "sketch.offset", json!({"curves":["e1"],"distance":-1,"chain":false}))["curves"][0].as_str().unwrap().to_string();
     let before_second = s.doc.to_json();
     let b = run(&mut s, "sketch.offset", json!({"curves":[a],"distance":-0.5,"chain":false}))["curves"][0].as_str().unwrap().to_string();
-    assert_eq!(&sketch(&s).points[..source.len()], source.as_slice());
+    assert_eq!(&sketch(&s).points.as_slice()[..source.len()], source.as_slice());
     let check = |session: &Session| {
         let sk = sketch(session);
         assert_eq!(sk.freeform_offsets.iter().map(|r| r.certificate).collect::<Vec<_>>(), [2, 2]);
@@ -2476,7 +2482,7 @@ fn trim_piece_is_what_a_trim_there_takes_away() {
         assert!(near(mid, inside), "{at:?}: {mid:?}");
         run(&mut s, "sketch.trim", json!({"curve": curve, "at": at}));
         let sk = sketch(&s);
-        assert!(!(0..sk.curves.len()).filter_map(|i| sk.shape(i)).any(|sh| sh.dist(mid) < 1e-6), "the trim at {at:?} took the piece shown away");
+        assert!(!sk.curves.indices().filter_map(|i| sk.shape(i)).any(|sh| sh.dist(mid) < 1e-6), "the trim at {at:?} took the piece shown away");
     }
     let mut s = new_sketch();
     let lone = ids(&run(&mut s, "sketch.line", json!({"points": [[0,0], [8,0]], "connect": false}))["curves"])[0].clone();
@@ -2599,7 +2605,7 @@ fn inside_offset_wall(s: &Session, output: &str) -> Vec2 {
     let sk = sketch(s);
     let index = sk.curve_index(output).unwrap();
     let q = sk.exact_pieces(index)[0].point_at(0.5);
-    let source: Vec<_> = (0..sk.curves.len()).filter(|i| *i < index && !sk.freeform_offsets.iter().any(|o| o.output == sk.curves[*i].id)).collect();
+    let source: Vec<_> = sk.curves.indices().filter(|i| *i < index && !sk.freeform_offsets.iter().any(|o| o.output == sk.curves[*i].id)).collect();
     let p = source
         .iter()
         .flat_map(|i| sk.exact_pieces(*i))
@@ -2673,7 +2679,7 @@ fn freeform_offsets_trim_folds_and_round_chain_corners_into_an_extrudable_wall()
             "an outer corner is rounded: {out}"
         );
         assert_eq!(sk.curves.len(), 5 + curves.len());
-        let source: Vec<_> = (0..5).flat_map(|i| sk.exact_pieces(i)).collect();
+        let source: Vec<_> = (0..5).flat_map(|i| sk.exact_pieces(CurveIdx(i))).collect();
         for c in &curves {
             for seg in sk.exact_pieces(sk.curve_index(c).unwrap()) {
                 for k in 0..=8 {
@@ -2702,8 +2708,8 @@ fn freeform_chain_offsets_take_the_straight_pieces_of_the_chain_along() {
     let distance = 1.26;
     let certified = |s: &Session, curves: &[String]| {
         let sk = sketch(s);
-        let offsets: Vec<usize> = curves.iter().map(|c| sk.curve_index(c).unwrap()).collect();
-        let source: Vec<_> = (0..sk.curves.len()).filter(|i| !offsets.contains(i)).flat_map(|i| sk.exact_pieces(i)).collect();
+        let offsets: Vec<CurveIdx> = curves.iter().map(|c| sk.curve_index(c).unwrap()).collect();
+        let source: Vec<_> = sk.curves.indices().filter(|i| !offsets.contains(i)).flat_map(|i| sk.exact_pieces(i)).collect();
         for &c in &offsets {
             for seg in sk.exact_pieces(c) {
                 for k in 0..=8 {
@@ -2722,7 +2728,7 @@ fn freeform_chain_offsets_take_the_straight_pieces_of_the_chain_along() {
         let sk = sketch(&s);
         let kinds = sk.curves.iter().map(|c| matches!(c.kind, CurveKind::Line { .. })).collect::<Vec<_>>();
         assert_eq!(kinds, [true, false, true, true], "lines and one Bézier curve");
-        let line = sk.curves[0].id.clone();
+        let line = sk.curves[CurveIdx(0)].id.clone();
         let out = run(&mut s, "sketch.offset", json!({"curves": [line], "distance": d}));
         let curves = ids(&out["curves"]);
         assert!(!curves.is_empty(), "{out}");

@@ -4,7 +4,7 @@ use std::f64::consts::TAU;
 
 use solidcraft_geom::{Seg2, Vec2};
 
-use crate::model::{CurveKind, Sketch};
+use crate::model::{CurveIdx, CurveKind, Sketch};
 
 /// A curve of the sketch as an analytic shape for splitting.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -163,12 +163,12 @@ pub fn nearest_crossing(x: &Shape, y: &Shape, near: Vec2) -> Option<Vec2> {
 ///
 /// Skips a crossing that already has a sketch point. Curves whose bounded distance from `p`
 /// is greater than `tol` cannot meet near the cursor and are ignored.
-pub fn nearest_curve_intersection(sk: &Sketch, p: Vec2, tol: f64) -> Option<(Vec2, usize, usize)> {
+pub fn nearest_curve_intersection(sk: &Sketch, p: Vec2, tol: f64) -> Option<(Vec2, CurveIdx, CurveIdx)> {
     if !p.is_finite() || !tol.is_finite() || tol <= 0.0 {
         return None;
     }
-    let mut candidates: Vec<(usize, Shape)> = Vec::new();
-    for i in 0..sk.curves.len() {
+    let mut candidates: Vec<(CurveIdx, Shape)> = Vec::new();
+    for i in sk.curves.indices() {
         if candidates.len() >= MAX_INTERSECTION_CANDIDATES {
             break;
         }
@@ -177,7 +177,7 @@ pub fn nearest_curve_intersection(sk: &Sketch, p: Vec2, tol: f64) -> Option<(Vec
             candidates.push((i, sh));
         }
     }
-    let mut best: Option<(f64, Vec2, usize, usize)> = None;
+    let mut best: Option<(f64, Vec2, CurveIdx, CurveIdx)> = None;
     for a in 0..candidates.len() {
         for b in a + 1..candidates.len() {
             let Some((ia, sa)) = candidates.get(a) else { continue };
@@ -254,7 +254,7 @@ impl Shape {
 
 impl Sketch {
     /// The analytic shape of a curve (arcs counter-clockwise from their stored start).
-    pub fn shape(&self, ci: usize) -> Option<Shape> {
+    pub fn shape(&self, ci: CurveIdx) -> Option<Shape> {
         match self.curves.get(ci)?.kind {
             CurveKind::Line { a, b } => Some(Shape::Line { a: self.point(a)?, b: self.point(b)? }),
             CurveKind::Circle { c, r } => Some(Shape::Round { c: self.point(c)?, r, start: 0.0, sweep: TAU }),

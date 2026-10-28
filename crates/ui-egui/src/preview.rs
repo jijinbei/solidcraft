@@ -23,6 +23,7 @@ use solidcraft_engine::geom::{Aabb3, Mesh, Ring, Vec3};
 use crate::SolveApp;
 use crate::gpu::{GpuScene, SceneSlot};
 use crate::theme::Tokens;
+use solidcraft_engine::sketch::{CurveIdx, PointIdx};
 
 /// Colours a preview is drawn with (straight sRGBA).
 #[derive(Clone, Copy, Debug)]
@@ -57,8 +58,8 @@ impl Colors {
 
 pub struct SketchPreview {
     pub sketch: std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
-    pub curves: Vec<usize>,
-    pub points: Vec<usize>,
+    pub curves: Vec<CurveIdx>,
+    pub points: Vec<PointIdx>,
 }
 
 /// A computed preview: the scene to draw and the bodies it stands in for.
@@ -732,8 +733,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             let indices = sketch
                 .sketch
                 .curves
-                .iter()
-                .enumerate()
+                .iter_enumerated()
                 .filter_map(|(index, curve)| {
                     let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
                         previous.kind == curve.kind
@@ -745,8 +745,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             let points = sketch
                 .sketch
                 .points
-                .iter()
-                .enumerate()
+                .iter_enumerated()
                 .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
                 .collect::<Vec<_>>();
             if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
@@ -1142,7 +1141,7 @@ mod tests {
         let built = build(&before, &after, colors());
         assert_eq!(built.sketches.len(), 1);
         for preview in &built.sketches {
-            assert_eq!(preview.curves, vec![0, 1]);
+            assert_eq!(preview.curves, vec![CurveIdx(0), CurveIdx(1)]);
             assert!(preview.points.is_empty());
         }
         Ok(())

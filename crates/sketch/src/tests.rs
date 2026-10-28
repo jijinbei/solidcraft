@@ -43,7 +43,7 @@ pub(crate) fn seed_of(sk: &Sketch) -> crate::construct::Seed {
 }
 
 /// Rough rectangle from four lines sharing corner points.
-fn rect(sk: &mut Sketch, p: [Vec2; 4]) -> [usize; 4] {
+fn rect(sk: &mut Sketch, p: [Vec2; 4]) -> [CurveIdx; 4] {
     let a = sk.add_point(p[0], None).unwrap();
     let b = sk.add_point(p[1], None).unwrap();
     let c = sk.add_point(p[2], None).unwrap();
@@ -56,7 +56,7 @@ fn rect(sk: &mut Sketch, p: [Vec2; 4]) -> [usize; 4] {
     ]
 }
 
-fn line_pts(sk: &Sketch, l: usize) -> (Vec2, Vec2) {
+fn line_pts(sk: &Sketch, l: CurveIdx) -> (Vec2, Vec2) {
     match sk.curves[l].kind {
         CurveKind::Line { a, b } => (sk.points[a].pos, sk.points[b].pos),
         _ => panic!(),
@@ -76,7 +76,7 @@ fn fully_constrained_rectangle() {
         CurveKind::Line { a, b } => (a, b),
         _ => panic!(),
     };
-    sk.add_constraint(Coincident { p: a, q: 0 }, None).unwrap();
+    sk.add_constraint(Coincident { p: a, q: PointIdx::ORIGIN }, None).unwrap();
     sk.add_constraint(Length { l: l[0], value: 40.0 }, Some("d1".into())).unwrap();
     sk.add_constraint(Length { l: l[1], value: 30.0 }, Some("d2".into())).unwrap();
     let rep = solve(&mut sk);
@@ -102,7 +102,7 @@ fn zero_distance_matches_coincident() {
             for fixed in [false, true] {
                 for value in [0.0, 1e-12] {
                     let mut sk = Sketch::new();
-                    let p = if fixed { 0 } else { sk.add_point(v(2.0, 3.0), None).unwrap() };
+                    let p = if fixed { PointIdx::ORIGIN } else { sk.add_point(v(2.0, 3.0), None).unwrap() };
                     let q = sk.add_point(sk.point(p).unwrap(), None).unwrap();
                     let mut equivalent = sk.clone();
                     let id = sk.add_constraint(ConstraintKind::Distance { p, q, value }, None).unwrap();
@@ -170,13 +170,13 @@ fn zero_distance_edits_preserve_dimension_rank() {
                         sk.curves[l].fixed = true;
                         ConstraintKind::PointLineDistance { p, l, value: 5.0 }
                     } else {
-                        ConstraintKind::Distance { p: 0, q: p, value: 5.0 }
+                        ConstraintKind::Distance { p: PointIdx::ORIGIN, q: p, value: 5.0 }
                     };
                     let id = sk.add_constraint(kind, None).unwrap();
                     let alignment = if direction == Vec2::X {
-                        ConstraintKind::HorizontalPoints { p: 0, q: p }
+                        ConstraintKind::HorizontalPoints { p: PointIdx::ORIGIN, q: p }
                     } else if direction == Vec2::Y {
-                        ConstraintKind::VerticalPoints { p: 0, q: p }
+                        ConstraintKind::VerticalPoints { p: PointIdx::ORIGIN, q: p }
                     } else {
                         let l = sk.add_line(direction * -10.0, direction * 10.0, None, None, None).unwrap();
                         sk.curves[l].fixed = true;
@@ -189,7 +189,7 @@ fn zero_distance_edits_preserve_dimension_rank() {
                         let report = solve_after_value_edit(&mut sk, &old);
                         assert!(report.ok(), "{point_line}, {direction:?}, {value}: {report:?}");
                         assert_eq!(report.dof, 0, "{point_line}, {direction:?}, {value}: {report:?}");
-                        assert!(report.point_determined[p]);
+                        assert!(report.point_determined[p.0]);
                         assert!(!report.redundant.contains(&id), "{report:?}");
                         assert!(determined_by(&sk, 0).is_empty());
                         assert!(constraint_residual(&sk, 0).unwrap() < 1e-6);
@@ -232,7 +232,7 @@ fn conflicting_constraints_fail_and_restore() {
 #[test]
 fn circles_tangent_equal_concentric() {
     let mut sk = Sketch::new();
-    let c1 = sk.add_circle(v(0.0, 0.0), 5.0, Some(0), None).unwrap();
+    let c1 = sk.add_circle(v(0.0, 0.0), 5.0, Some(PointIdx::ORIGIN), None).unwrap();
     let c2 = sk.add_circle(v(12.0, 1.0), 3.0, None, None).unwrap();
     use ConstraintKind::*;
     sk.add_constraint(Radius { c: c1, value: 10.0 }, None).unwrap();
@@ -251,7 +251,7 @@ fn circles_tangent_equal_concentric() {
 #[test]
 fn line_tangent_to_circle_and_angles() {
     let mut sk = Sketch::new();
-    let c = sk.add_circle(v(0.0, 0.0), 10.0, Some(0), None).unwrap();
+    let c = sk.add_circle(v(0.0, 0.0), 10.0, Some(PointIdx::ORIGIN), None).unwrap();
     use ConstraintKind::*;
     sk.add_constraint(Radius { c, value: 10.0 }, None).unwrap();
     let l = sk.add_line(v(-20.0, 12.0), v(20.0, 11.0), None, None, None).unwrap();
@@ -260,7 +260,7 @@ fn line_tangent_to_circle_and_angles() {
     assert!(solve(&mut sk).ok());
     let (a, _) = line_pts(&sk, l);
     assert!((a.y.abs() - 10.0).abs() < 1e-7, "{a:?}");
-    let m = sk.add_line(v(0.0, 0.0), v(10.0, 3.0), Some(0), None, None).unwrap();
+    let m = sk.add_line(v(0.0, 0.0), v(10.0, 3.0), Some(PointIdx::ORIGIN), None, None).unwrap();
     sk.add_constraint(Angle { a: l, b: m, value: PI / 6.0, flip: false }, None).unwrap();
     sk.add_constraint(Length { l: m, value: 8.0 }, None).unwrap();
     assert!(solve(&mut sk).ok());
@@ -326,7 +326,7 @@ fn profiles_rectangle_with_hole_and_split() {
     // Re-split bottom and top edges at x = 10 by rebuilding the sketch as 7 lines.
     let mut s3 = Sketch::new();
     let pts = [v(0.0, 0.0), v(10.0, 0.0), v(40.0, 0.0), v(40.0, 30.0), v(10.0, 30.0), v(0.0, 30.0)];
-    let ids: Vec<usize> = pts.iter().map(|p| s3.add_point(*p, None).unwrap()).collect();
+    let ids: Vec<PointIdx> = pts.iter().map(|p| s3.add_point(*p, None).unwrap()).collect();
     for i in 0..6 {
         s3.add_line_pts(ids[i], ids[(i + 1) % 6], None).unwrap();
     }
@@ -344,7 +344,7 @@ fn profile_with_arcs_and_construction_ignored() {
     // Slot: two lines and two half arcs.
     let mut sk = Sketch::new();
     let p = [v(0.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(0.0, 10.0)];
-    let ids: Vec<usize> = p.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
+    let ids: Vec<PointIdx> = p.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
     sk.add_line_pts(ids[0], ids[1], None).unwrap();
     sk.add_arc(v(20.0, 5.0), p[1], p[2], [None, Some(ids[1]), Some(ids[2])], None).unwrap();
     sk.add_line_pts(ids[2], ids[3], None).unwrap();
@@ -379,12 +379,30 @@ fn removal_and_references() {
 }
 
 #[test]
+fn indices_save_as_plain_numbers() {
+    assert_eq!(serde_json::to_string(&PointIdx(3)).unwrap(), "3");
+    assert_eq!(serde_json::to_string(&CurveIdx(7)).unwrap(), "7");
+    assert_eq!(serde_json::from_str::<PointIdx>("4").unwrap(), PointIdx(4));
+    let mut sk = Sketch::new();
+    let l = sk.add_line(v(0.0, 0.0), v(1.0, 0.0), None, None, Some("l1")).unwrap();
+    sk.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
+    let saved = serde_json::to_value(&sk).unwrap();
+    assert_eq!(saved["curves"][0]["a"], 1);
+    assert_eq!(saved["curves"][0]["b"], 2);
+    assert_eq!(saved["constraints"][0]["l"], 0);
+    let back: Sketch = serde_json::from_value(saved).unwrap();
+    assert_eq!(back.curves.get(CurveIdx(0)).map(|c| c.id.as_str()), Some("l1"));
+    assert_eq!(back.points.get(PointIdx(2)).map(|p| p.id.as_str()), Some("l1.end"));
+    assert!(back.curves.get(CurveIdx(1)).is_none());
+}
+
+#[test]
 fn hostile_values_rejected() {
     let mut sk = Sketch::new();
     assert!(sk.add_point(v(f64::NAN, 0.0), None).is_err());
     assert!(sk.add_circle(v(0.0, 0.0), -1.0, None, None).is_err());
     assert!(sk.add_circle(v(0.0, 0.0), f64::INFINITY, None, None).is_err());
-    assert!(sk.add_constraint(ConstraintKind::Horizontal { l: 99 }, None).is_err());
+    assert!(sk.add_constraint(ConstraintKind::Horizontal { l: CurveIdx(99) }, None).is_err());
     let c = sk.add_circle(v(0.0, 0.0), 1.0, None, None).unwrap();
     assert!(sk.add_constraint(ConstraintKind::Horizontal { l: c }, None).is_err());
     assert!(sk.add_constraint(ConstraintKind::Radius { c, value: f64::NAN }, None).is_err());
@@ -404,7 +422,7 @@ fn profiles_split_at_crossings_and_touch_points() {
     }
     // Belt: two circles joined by two tangent lines whose ends sit on the circles.
     let mut b = Sketch::new();
-    let c1 = b.add_circle(v(0.0, 0.0), 20.0, Some(0), None).unwrap();
+    let c1 = b.add_circle(v(0.0, 0.0), 20.0, Some(PointIdx::ORIGIN), None).unwrap();
     let c2 = b.add_circle(v(50.0, 0.0), 10.0, None, None).unwrap();
     let l1 = b.add_line(v(3.0, 19.0), v(47.0, 13.0), None, None, None).unwrap();
     let l2 = b.add_line(v(1.0, -22.0), v(44.0, -8.0), None, None, None).unwrap();
@@ -494,14 +512,14 @@ fn solver_tangencies_split_profiles() {
 }
 
 /// Sorted curve ids.
-fn id_set(sk: &Sketch, curves: &[usize]) -> Vec<String> {
+fn id_set(sk: &Sketch, curves: &[CurveIdx]) -> Vec<String> {
     let mut ids: Vec<String> = curves.iter().map(|c| sk.curves[*c].id.clone()).collect();
     ids.sort();
     ids
 }
 
 /// A projected line of `a`–`b` in `sk`.
-fn reference_line(sk: &mut Sketch, a: Vec2, b: Vec2) -> usize {
+fn reference_line(sk: &mut Sketch, a: Vec2, b: Vec2) -> CurveIdx {
     let link = sk.add_link(LinkKind::Project, LinkSource::SketchCurve { sketch: 1, curve: "edge".into() }, &[LinkGeom::Line(a, b)]).unwrap();
     sk.link_curves(&link)[0]
 }
@@ -653,7 +671,7 @@ fn near_overlaps_that_are_not_one_path_keep_their_regions() {
     // sampled pieces, one of them on the chord, but its exact curve bounds the region.
     let s = 8e-6;
     let mut sk = Sketch::new();
-    let ids: Vec<usize> = [v(-5.0, 0.0), v(-5.0 / 3.0, 4.0 * s / 3.0), v(5.0 / 3.0, 4.0 * s / 3.0), v(5.0, 0.0)]
+    let ids: Vec<PointIdx> = [v(-5.0, 0.0), v(-5.0 / 3.0, 4.0 * s / 3.0), v(5.0 / 3.0, 4.0 * s / 3.0), v(5.0, 0.0)]
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
@@ -874,13 +892,13 @@ fn links_update_in_place_rebuild_and_break() {
     // Linked circles keep their radius in the solver.
     let c = sk.link_curves(&j)[0];
     let rep = solve(&mut sk);
-    assert!(rep.curve_determined[c], "{rep:?}");
+    assert!(rep.curve_determined[c.0], "{rep:?}");
     // Breaking the link frees it.
     sk.break_link(&j).unwrap();
     assert!(sk.links.is_empty());
     assert!(sk.curves[c].link.is_none());
     let rep = solve(&mut sk);
-    assert!(!rep.curve_determined[c]);
+    assert!(!rep.curve_determined[c.0]);
     // Deleting all of a link's curves removes the link.
     let j2 = sk.add_link(LinkKind::Project, LinkSource::Origin, &[LinkGeom::Line(v(0.0, 0.0), v(1.0, 0.0))]).unwrap();
     let cs = sk.link_curves(&j2);
@@ -923,7 +941,7 @@ fn large_sketch_solves_fast() {
 fn long_connected_chain_solves() {
     let mut sk = Sketch::new();
     let n = 300;
-    let mut prev = 0usize;
+    let mut prev = PointIdx::ORIGIN;
     for i in 0..n {
         let p = sk.add_point(v((i + 1) as f64 * 10.0 + 0.3, if i % 2 == 0 { 0.4 } else { -0.2 }), None).unwrap();
         let l = sk.add_line_pts(prev, p, None).unwrap();
@@ -949,7 +967,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
     let closed = |p: &Profile| p.region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9);
     // Degree 5 over six points, closed by a line.
     let mut sk = Sketch::default();
-    let ids: Vec<usize> = [v(0.0, 0.0), v(4.0, 10.0), v(10.0, 12.0), v(16.0, 12.0), v(22.0, 10.0), v(26.0, 0.0)]
+    let ids: Vec<PointIdx> = [v(0.0, 0.0), v(4.0, 10.0), v(10.0, 12.0), v(16.0, 12.0), v(22.0, 10.0), v(26.0, 0.0)]
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
@@ -961,7 +979,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
     assert!(closed(&pr[0]));
     // A fit spline arch over a base line, cut by a vertical line at x = 10.
     let mut sk = Sketch::default();
-    let ids: Vec<usize> = [v(0.0, 0.0), v(6.0, 9.0), v(14.0, 9.0), v(20.0, 0.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    let ids: Vec<PointIdx> = [v(0.0, 0.0), v(6.0, 9.0), v(14.0, 9.0), v(20.0, 0.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
     sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3, periodic: false }, None).unwrap();
     sk.add_line_pts(ids[3], ids[0], None).unwrap();
     let (a, b) = (sk.add_point(v(10.0, -5.0), None).unwrap(), sk.add_point(v(10.0, 20.0), None).unwrap());
@@ -1032,7 +1050,7 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     let mut sk = Sketch::new();
     let bump =
         [v(0.0, 0.0), v(1.5, 4.0), v(3.0, 7.0), v(5.0, 9.5), v(7.5, 11.0), v(12.5, 11.0), v(15.0, 9.5), v(17.0, 7.0), v(18.5, 4.0), v(20.0, 0.0)];
-    let pts: Vec<usize> = bump.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
+    let pts: Vec<PointIdx> = bump.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
     let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 9, periodic: false }, None).unwrap();
     let pieces = sk.exact_pieces(s);
     assert_eq!(pieces.len(), 1, "{pieces:?}");
@@ -1066,7 +1084,7 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     assert!((ps[0].area - sampled.abs()).abs() < 1e-5, "{} vs {sampled}", ps[0].area);
     assert!((ps[0].area - 100.0).abs() > 1e-3, "the region is not its chord: {}", ps[0].area);
     // A degree above the cap is still refused.
-    let mut high: Vec<usize> = pts.clone();
+    let mut high: Vec<PointIdx> = pts.clone();
     high.push(sk.add_point(v(21.0, -2.0), None).unwrap());
     assert!(sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false }, None).is_err());
 }
@@ -1078,12 +1096,12 @@ fn curves_apart(a: &[Vec2], b: &[Vec2]) -> f64 {
 }
 
 /// A fit spline through five points, its points and curve index.
-fn wave_spline(sk: &mut Sketch, periodic: bool) -> (Vec<usize>, usize) {
+fn wave_spline(sk: &mut Sketch, periodic: bool) -> (Vec<PointIdx>, CurveIdx) {
     let mut shape = vec![v(0.0, 0.0), v(10.0, 12.0), v(25.0, 4.0), v(38.0, 15.0), v(50.0, 0.0)];
     if periodic {
         shape.push(v(0.0, 0.0));
     }
-    let mut pts: Vec<usize> = shape.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
+    let mut pts: Vec<PointIdx> = shape.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
     if periodic {
         pts.pop();
         pts.push(pts[0]);
@@ -1093,7 +1111,7 @@ fn wave_spline(sk: &mut Sketch, periodic: bool) -> (Vec<usize>, usize) {
 }
 
 /// The distance from `q` to the exact curve `ci`.
-fn off_curve(sk: &Sketch, ci: usize, q: Vec2) -> f64 {
+fn off_curve(sk: &Sketch, ci: CurveIdx, q: Vec2) -> f64 {
     sk.exact_pieces(ci).iter().map(|seg| seg.point_at(seg.closest_param(q)).dist(q)).fold(f64::INFINITY, f64::min)
 }
 
@@ -1127,7 +1145,7 @@ fn a_fit_point_inserted_into_a_spline_keeps_the_curve_through_its_points() {
     let mut k = sk.clone();
     assert!(k.insert_spline_point(s, old[2]).is_err());
     assert_eq!(k, sk, "a refused insertion changes nothing");
-    let cv: Vec<usize> = old.iter().map(|q| k.add_point(*q + v(0.0, 30.0), None).unwrap()).collect();
+    let cv: Vec<PointIdx> = old.iter().map(|q| k.add_point(*q + v(0.0, 30.0), None).unwrap()).collect();
     let c = k.add_curve(CurveKind::Spline { pts: cv, control: true, degree: 3, periodic: false }, None).unwrap();
     assert!(k.insert_spline_point(c, v(20.0, 38.0)).is_err());
     let l = k.add_line(v(0.0, -10.0), v(50.0, -10.0), None, None, None).unwrap();
@@ -1179,7 +1197,7 @@ fn profiles_line_passing_next_to_a_junction_splits_the_loop() {
     let mut sk = Sketch::new();
     let right = sk.add_arc(o, v(0.0, -1.0), v(0.0, 1.0), [None; 3], None).unwrap();
     let left = sk.add_arc(v(-5.0, 0.0), v(-5.0, 1.0), v(-5.0, -1.0), [None; 3], None).unwrap();
-    let ends = |i: usize| match sk.curves[i].kind {
+    let ends = |i: CurveIdx| match sk.curves[i].kind {
         CurveKind::Arc { a, b, .. } => (a, b),
         _ => panic!("an arc"),
     };
@@ -1260,11 +1278,18 @@ fn zero_component_dimensions_keep_independent_rank() {
         for value in [0.0, 0.5, 1.0] {
             let mut sk = Sketch::new();
             let q = sk.add_point(if vertical { v(10.0, 3.0) } else { v(3.0, 10.0) }, None).unwrap();
-            let existing =
-                if vertical { ConstraintKind::DistanceX { p: 0, q, value: 10.0 } } else { ConstraintKind::DistanceY { p: 0, q, value: 10.0 } };
+            let existing = if vertical {
+                ConstraintKind::DistanceX { p: PointIdx::ORIGIN, q, value: 10.0 }
+            } else {
+                ConstraintKind::DistanceY { p: PointIdx::ORIGIN, q, value: 10.0 }
+            };
             sk.add_constraint(existing, None).unwrap();
             assert_eq!(solve(&mut sk).dof, 1);
-            let added = if vertical { ConstraintKind::DistanceY { p: 0, q, value } } else { ConstraintKind::DistanceX { p: 0, q, value } };
+            let added = if vertical {
+                ConstraintKind::DistanceY { p: PointIdx::ORIGIN, q, value }
+            } else {
+                ConstraintKind::DistanceX { p: PointIdx::ORIGIN, q, value }
+            };
             let id = sk.add_constraint(added, None).unwrap();
             let report = solve(&mut sk);
             assert!(report.ok(), "{report:?}");
@@ -1280,7 +1305,7 @@ fn zero_component_dimensions_keep_independent_rank() {
 /// A fillet as `sketch.fillet` makes it: `l1` from (10, 10) to (35, 10), the arc round
 /// (35, 15) from (35, 10) to (40, 15), `l2` from (40, 15) to (40, 30); horizontal, vertical,
 /// radius 5, tangent at both ends. Returns (l1, arc, l2, l1's far point, l2's far point).
-fn filleted_corner() -> (Sketch, usize, usize, usize, usize, usize) {
+fn filleted_corner() -> (Sketch, CurveIdx, CurveIdx, CurveIdx, PointIdx, PointIdx) {
     let mut sk = Sketch::new();
     let l1 = sk.add_line(v(10.0, 10.0), v(35.0, 10.0), None, None, None).unwrap();
     let CurveKind::Line { a: far1, b: ta } = sk.curves[l1].kind else { panic!() };
@@ -1299,7 +1324,7 @@ fn filleted_corner() -> (Sketch, usize, usize, usize, usize, usize) {
 }
 
 /// The arc's counter-clockwise sweep from its stored `a` to `b`, degrees.
-fn sweep_deg(sk: &Sketch, arc: usize) -> f64 {
+fn sweep_deg(sk: &Sketch, arc: CurveIdx) -> f64 {
     let CurveKind::Arc { c, a, b } = sk.curves[arc].kind else { panic!() };
     let (c, a, b) = (sk.points[c].pos, sk.points[a].pos, sk.points[b].pos);
     ((b - c).angle() - (a - c).angle()).rem_euclid(2.0 * PI).to_degrees()
@@ -1307,7 +1332,7 @@ fn sweep_deg(sk: &Sketch, arc: usize) -> f64 {
 
 /// Each line leaves the arc at its touch point along the arc's travel (a smooth path, not a
 /// line cutting back through the arc).
-fn lines_leave_the_arc(sk: &Sketch, arc: usize, lines: [usize; 2]) -> bool {
+fn lines_leave_the_arc(sk: &Sketch, arc: CurveIdx, lines: [CurveIdx; 2]) -> bool {
     let CurveKind::Arc { c, a, b } = sk.curves[arc].kind else { panic!() };
     lines.iter().all(|&l| {
         let CurveKind::Line { a: la, b: lb } = sk.curves[l].kind else { panic!() };
@@ -1363,7 +1388,7 @@ fn a_fillet_folded_through_flat_is_refused_like_a_fold() {
         let rep = solve_with(&mut sk, &hold, Some(&reference), Analysis::Full, None);
         if !rep.ok() {
             assert!(!rep.folded.is_empty(), "step {step}: {rep:?}");
-            let stays = sk.points.iter().enumerate().filter(|(i, _)| *i != far2).all(|(i, p)| p.pos == reference[i]);
+            let stays = sk.points.iter_enumerated().filter(|(i, _)| *i != far2).all(|(i, p)| p.pos == reference[i.0]);
             assert!(stays, "step {step}: the sketch stays");
             refused = Some(step);
             break;

@@ -5,7 +5,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::{self, Kind};
-use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, Sketch, solve_with};
+use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, Hold, PointIdx, Sketch, solve_with};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_};
@@ -153,7 +153,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The point a length dimension keeps when its value changes: the first it measures from (a
 /// line's start). None for other dimensions.
-fn dimension_start(sk: &Sketch, kind: &ConstraintKind) -> Option<usize> {
+fn dimension_start(sk: &Sketch, kind: &ConstraintKind) -> Option<PointIdx> {
     match kind {
         ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => Some(*p),
         ConstraintKind::Length { l, .. } => match sk.curves.get(*l)?.kind {
@@ -170,7 +170,7 @@ fn dimension_start(sk: &Sketch, kind: &ConstraintKind) -> Option<usize> {
 /// positions. Where holding it can't solve (a symmetry moves both ends), evaluation solves as
 /// before.
 fn keep_dimension_start(s: &mut Session, name: &str) {
-    let targets: Vec<(u64, usize)> = s
+    let targets: Vec<(u64, PointIdx)> = s
         .doc
         .features
         .iter()

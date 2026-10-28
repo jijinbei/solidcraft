@@ -11,7 +11,7 @@
 //! apart except at the nodes they share. The result is ordinary curves: it is not linked
 //! to its source.
 use super::{Certificate, H, MAX_OFFSET_WORK, MAX_PIECES, OFFSET_TOLERANCE, Result, bad, certify, normal_point};
-use crate::{CurveKind, Sketch, fit_beziers};
+use crate::{CurveIdx, CurveKind, PointIdx, Sketch, fit_beziers};
 use solidcraft_geom::{Seg2, Vec2};
 
 /// Samples of the plain offset used to find its crossings (whole chain).
@@ -39,10 +39,10 @@ const KINK: f64 = OFFSET_TOLERANCE * 0.8;
 #[derive(Clone, Debug, PartialEq)]
 pub enum FreeformOffsetOutput {
     /// One spline that follows its source (an associative offset).
-    Linked(usize),
+    Linked(CurveIdx),
     /// Open splines (and corner arcs) meeting where the plain offset's loops were trimmed
     /// away. They are ordinary curves, not linked to the source.
-    Unlinked(Vec<usize>),
+    Unlinked(Vec<CurveIdx>),
 }
 
 /// One piece of the plain offset.
@@ -131,7 +131,7 @@ impl Raw {
     }
 
     /// The plain offset of the oriented curves of a chain.
-    fn chain(sk: &Sketch, order: &[(usize, bool)], d: f64) -> Result<Self> {
+    fn chain(sk: &Sketch, order: &[(CurveIdx, bool)], d: f64) -> Result<Self> {
         if order.is_empty() || !d.is_finite() || d.abs() < 1e-9 {
             return Err(bad("invalid offset"));
         }
@@ -1001,7 +1001,7 @@ impl Sketch {
     /// linked offset ([`Sketch::add_freeform_offset`]). Where the plain offset folds over
     /// a bend tighter than the distance, or crosses itself, its loops are trimmed away and
     /// the result is open splines meeting at sharp corners, not linked to the source.
-    pub fn offset_freeform(&mut self, source: usize, forward: bool, distance: f64) -> Result<FreeformOffsetOutput> {
+    pub fn offset_freeform(&mut self, source: CurveIdx, forward: bool, distance: f64) -> Result<FreeformOffsetOutput> {
         let plain = match self.add_freeform_offset(source, forward, distance) {
             Ok(output) => return Ok(FreeformOffsetOutput::Linked(output)),
             Err(error) => error,
@@ -1020,7 +1020,7 @@ impl Sketch {
     /// Offset a chain of curves (oriented, in order) that includes free-form curves: every
     /// piece's normal offset, joined round the chain's corners by arcs and trimmed where it
     /// folds or crosses. The result is ordinary curves, not linked to the chain.
-    pub fn offset_freeform_chain(&mut self, order: &[(usize, bool)], distance: f64) -> Result<Vec<usize>> {
+    pub fn offset_freeform_chain(&mut self, order: &[(CurveIdx, bool)], distance: f64) -> Result<Vec<CurveIdx>> {
         let raw = Raw::chain(self, order, distance)?;
         let us = samples(&raw);
         match self.add_trimmed_offset(&raw, &us, false) {
@@ -1030,7 +1030,7 @@ impl Sketch {
         }
     }
 
-    fn add_trimmed_offset(&mut self, raw: &Raw, us: &[f64], require_crossing: bool) -> std::result::Result<Vec<usize>, Trim> {
+    fn add_trimmed_offset(&mut self, raw: &Raw, us: &[f64], require_crossing: bool) -> std::result::Result<Vec<CurveIdx>, Trim> {
         let pts = us.iter().map(|u| raw.point(*u)).collect::<Result<Vec<_>>>()?;
         let src = us.iter().map(|u| raw.source(*u)).collect::<Result<Vec<_>>>()?;
         let crossings = crossings(raw, us, &pts)?;
@@ -1042,10 +1042,10 @@ impl Sketch {
         let fitted = arcs.iter().map(|arc| fit_arc(raw, arc, &crossings, &mut work)).collect::<Result<Vec<_>>>()?;
         verify_trimmed(&fitted)?;
         let mut candidate = self.clone();
-        let mut corners: Vec<Option<usize>> = vec![None; crossings.len()];
+        let mut corners: Vec<Option<PointIdx>> = vec![None; crossings.len()];
         let mut outputs = Vec::new();
         for arc in &fitted {
-            let mut shared = |end: End, at: Vec2, candidate: &mut Sketch| -> Result<usize> {
+            let mut shared = |end: End, at: Vec2, candidate: &mut Sketch| -> Result<PointIdx> {
                 match end {
                     End::Crossing(i) => match corners.get(i).copied().flatten() {
                         Some(index) => Ok(index),
@@ -1108,7 +1108,7 @@ impl Sketch {
 mod tests {
     use super::*;
 
-    fn spline(coords: &[(f64, f64)], periodic: bool) -> (Sketch, usize) {
+    fn spline(coords: &[(f64, f64)], periodic: bool) -> (Sketch, CurveIdx) {
         let mut sk = Sketch::new();
         let pts = coords.iter().map(|(x, y)| sk.add_point(Vec2::new(*x, *y), None).unwrap()).collect();
         let source = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic }, None).unwrap();
@@ -1122,7 +1122,7 @@ mod tests {
 
     /// Every output curve stays the offset distance from the source, and (when `closed`)
     /// every output end meets another output's end.
-    fn check_offset(sk: &Sketch, source: &[Seg2], curves: &[usize], distance: f64, closed: bool) {
+    fn check_offset(sk: &Sketch, source: &[Seg2], curves: &[CurveIdx], distance: f64, closed: bool) {
         for c in curves {
             for seg in sk.exact_pieces(*c) {
                 for j in 0..=16 {
@@ -1175,7 +1175,7 @@ mod tests {
             panic!("a 1.26 mm offset over a 0.3 mm notch must be trimmed");
         };
         assert!(sk.freeform_offsets.is_empty(), "a trimmed offset is not linked");
-        assert_eq!(&sk.points[..before.points.len()], &before.points);
+        assert_eq!(&sk.points.as_slice()[..before.points.len()], before.points.as_slice());
         let exact = sk.exact_segs(source).unwrap();
         check_offset(&sk, &exact, &curves, 1.26, true);
         // The corner left where the loop was cut lies outside the notch, the full
@@ -1202,7 +1202,7 @@ mod tests {
     }
 
     /// A closed chain of cubic Bézier curves, the way SVG outlines import.
-    fn chain_of(beziers: &[[(f64, f64); 4]]) -> (Sketch, Vec<(usize, bool)>) {
+    fn chain_of(beziers: &[[(f64, f64); 4]]) -> (Sketch, Vec<(CurveIdx, bool)>) {
         let mut sk = Sketch::new();
         let first = sk.add_point(Vec2::new(beziers[0][0].0, beziers[0][0].1), None).unwrap();
         let mut start = first;
@@ -1221,7 +1221,7 @@ mod tests {
     /// An outline like an imported SVG: real corners both ways, a joint with a tiny kink,
     /// and a zero-length handle (pointing roughly along its curve, as drawing programs make
     /// them).
-    fn bezier_chain() -> (Sketch, Vec<(usize, bool)>) {
+    fn bezier_chain() -> (Sketch, Vec<(CurveIdx, bool)>) {
         chain_of(&[
             [(0.0, 0.0), (10.0, -5.0), (20.0, -5.0), (30.0, 0.0)],
             // Corner at (30, 0).
@@ -1242,7 +1242,7 @@ mod tests {
             let before = sk.clone();
             let source: Vec<Seg2> = order.iter().flat_map(|(c, _)| sk.exact_segs(*c).unwrap()).collect();
             let curves = sk.offset_freeform_chain(&order, distance).unwrap();
-            assert_eq!(&sk.points[..before.points.len()], &before.points);
+            assert_eq!(&sk.points.as_slice()[..before.points.len()], before.points.as_slice());
             check_offset(&sk, &source, &curves, distance.abs(), true);
             let arcs = curves.iter().filter(|c| matches!(sk.curves[**c].kind, CurveKind::Arc { .. })).count();
             assert!(arcs >= 1, "an outer corner is rounded on each side ({distance})");
@@ -1283,7 +1283,7 @@ mod tests {
     fn hostile_offsets_never_panic() {
         let (sk, source) = spline(&COOKIE, true);
         let (chain, order) = bezier_chain();
-        let reversed: Vec<(usize, bool)> = order.iter().rev().map(|(c, f)| (*c, !f)).collect();
+        let reversed: Vec<(CurveIdx, bool)> = order.iter().rev().map(|(c, f)| (*c, !f)).collect();
         for d in [f64::NAN, f64::INFINITY, 0.0, 1e-12, 1e6, -1e6, 50.0, -50.0, 19.0, 1.26, -1.8, 1.8] {
             for forward in [true, false] {
                 let _ = sk.clone().offset_freeform(source, forward, d);

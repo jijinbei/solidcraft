@@ -994,7 +994,7 @@ fn alignment_items(selection: &[Sel]) -> Vec<Item> {
 /// Sketch entity items: construction, fix, delete, dimension and the constraints the selection
 /// can take.
 fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
-    use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
+    use solidcraft_engine::sketch::{ConstraintKind, CurveIdx, CurveKind};
     let Some(sid) = app.session.active_sketch else { return Vec::new() };
     let st = app.session.world_state();
     let Some(ss) = st.sketch(sid) else { return Vec::new() };
@@ -1044,7 +1044,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         if dims.len() == 1 {
             v.push(cmd(app, "sketch.toggle_driven", "Toggle Driven Dimension").with(json!({ "constraint": dims[0] })));
             // A circle's or an arc's radius or diameter switches to the other one (#7499).
-            let round = |c: usize| matches!(ss.sketch.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
+            let round = |c: CurveIdx| matches!(ss.sketch.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
             if ss
                 .sketch
                 .constraints

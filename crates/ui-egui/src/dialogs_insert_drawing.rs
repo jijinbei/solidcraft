@@ -107,7 +107,8 @@ mod tests {
     fn lines(h: &Harness) -> Vec<(solidcraft_engine::geom::Vec2, solidcraft_engine::geom::Vec2)> {
         let st = h.app.session.world_state();
         let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-        (0..sk.curves.len())
+        sk.curves
+            .indices()
             .filter_map(|i| match sk.shape(i) {
                 Some(solidcraft_engine::sketch::Shape::Line { a, b }) => Some((a, b)),
                 _ => None,

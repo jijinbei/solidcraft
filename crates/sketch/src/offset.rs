@@ -1,5 +1,5 @@
 //! Associative offsets keep their output entity ids while their source curves move.
-use crate::{ConstraintKind, CurveKind, Shape, Sketch, SketchError, intersections};
+use crate::{ConstraintKind, CurveIdx, CurveKind, PointIdx, Shape, Sketch, SketchError, intersections};
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec2;
 
@@ -57,14 +57,14 @@ impl Sketch {
     /// centre (and the source with it) to the middle of the held ends: a slot offset by 1 mm
     /// could no longer be moved by the dimension that places it. The source's own arc keeps the
     /// centre, and the offset is rebuilt from the source after the solve.
-    pub(crate) fn offset_arc_follows_source(&self, curve: usize) -> bool {
+    pub(crate) fn offset_arc_follows_source(&self, curve: CurveIdx) -> bool {
         if self.offsets.is_empty() {
             return false;
         }
         let Some(arc) = self.curves.get(curve) else { return false };
         let CurveKind::Arc { c: centre, .. } = arc.kind else { return false };
         let output = |id: &str| self.offsets.iter().any(|o| o.owns_output(id));
-        output(&arc.id) && self.curves.iter().enumerate().any(|(k, other)| k != curve && other.kind.uses(centre) && !output(&other.id))
+        output(&arc.id) && self.curves.iter_enumerated().any(|(k, other)| k != curve && other.kind.uses(centre) && !output(&other.id))
     }
 
     /// Endpoints of a normal-distance annotation, evaluated from its source curve.
@@ -84,7 +84,7 @@ impl Sketch {
     /// Removing an output removes its relationship. A partial analytic chain
     /// deletion releases the surviving outputs, while retained dependents keep
     /// their source references so the command's refresh refuses broken sources.
-    pub(crate) fn prune_offsets_for_removed_curves(&mut self, which: &[usize]) {
+    pub(crate) fn prune_offsets_for_removed_curves(&mut self, which: &[CurveIdx]) {
         let removed = which.iter().filter_map(|i| self.curves.get(*i).map(|curve| curve.id.clone())).collect::<std::collections::BTreeSet<_>>();
         if removed.is_empty() {
             return;
@@ -106,7 +106,7 @@ impl Sketch {
             .flat_map(|curve| curve.kind.point_ids())
             .collect::<std::collections::BTreeSet<_>>();
         for index in points {
-            if index != 0
+            if index != PointIdx::ORIGIN
                 && self.curves.iter().all(|curve| !curve.kind.uses(index) || released.contains(&curve.id))
                 && let Some(point) = self.points.get_mut(index)
             {

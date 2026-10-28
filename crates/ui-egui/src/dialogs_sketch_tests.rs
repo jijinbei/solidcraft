@@ -2,6 +2,7 @@
 use super::*;
 use crate::scenario::{self, Harness};
 use crate::sketch_modify_ui::Mod;
+use solidcraft_engine::sketch::CurveIdx;
 
 fn fixture() -> Harness {
     let mut h = Harness::new();
@@ -18,10 +19,10 @@ fn picked(h: &Harness, command: &str) -> Dialog {
         d.inputs[0].items = vec![if matches!(k, Mod::Corner { .. }) {
             Sel::SketchPoint { id: sk.points.iter().find(|p| p.id != "origin").unwrap().id.clone() }
         } else {
-            Sel::SketchCurve { id: sk.curves[0].id.clone(), sketch: None }
+            Sel::SketchCurve { id: sk.curves[CurveIdx(0)].id.clone(), sketch: None }
         }];
         if matches!(k, Mod::Mirror) {
-            d.inputs[1].items = vec![Sel::SketchCurve { id: sk.curves[3].id.clone(), sketch: None }];
+            d.inputs[1].items = vec![Sel::SketchCurve { id: sk.curves[CurveIdx(3)].id.clone(), sketch: None }];
         }
         if matches!(k, Mod::PatternCirc { .. }) {
             d.inputs[1].items = vec![Sel::SketchPoint { id: "origin".into() }];
@@ -154,7 +155,7 @@ fn apply_in_the_header_row_commits_once_and_keeps_the_dialog() {
 fn picked_list_removes_one_item_and_field_still_activates_input() {
     let mut h = fixture();
     let mut d = picked(&h, "sketch.scale");
-    let second = h.app.session.doc.sketch(1).unwrap().curves[1].id.clone();
+    let second = h.app.session.doc.sketch(1).unwrap().curves[CurveIdx(1)].id.clone();
     d.inputs[0].items.push(Sel::SketchCurve { id: second.clone(), sketch: None });
     h.app.dialog = Some(d);
     h.frames(4);
@@ -379,7 +380,7 @@ fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
     let state = h.app.session.world_state();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
-    for p in (0..sk.curves.len()).flat_map(|i| sk.polyline(i)) {
+    for p in sk.curves.indices().flat_map(|i| sk.polyline(i)) {
         lo = (lo.0.min(p.x), lo.1.min(p.y));
         hi = (hi.0.max(p.x), hi.1.max(p.y));
     }
@@ -389,6 +390,6 @@ fn transform_handles_and_fields_scale_move_and_turn_the_picks() {
     h.settle();
     let state = h.app.session.world_state();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-    let top = (0..sk.curves.len()).flat_map(|i| sk.polyline(i)).fold(f64::MIN, |m, p| m.max(p.x));
+    let top = sk.curves.indices().flat_map(|i| sk.polyline(i)).fold(f64::MIN, |m, p| m.max(p.x));
     assert!((top - 40.0).abs() < 1e-6, "one undo puts it back: {top}");
 }

@@ -5,6 +5,7 @@
 use egui::{Pos2, Rect};
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::sketch::CurveIdx;
 
 use crate::viewport::Hit;
 
@@ -30,7 +31,7 @@ pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 
 }
 
 /// The current middle of a finite straight sketch edge.
-pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize) -> Option<solidcraft_engine::geom::Vec2> {
+pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: CurveIdx) -> Option<solidcraft_engine::geom::Vec2> {
     let curve = sk.curves.get(line)?;
     if curve.infinite {
         return None;

@@ -17,10 +17,10 @@ fn circumcentre(a: Vec2, t: Vec2, b: Vec2) -> Vec2 {
 
 struct Joint {
     sk: Sketch,
-    line: usize,
-    arc: usize,
-    line_end: usize,
-    arc_start: usize,
+    line: CurveIdx,
+    arc: CurveIdx,
+    line_end: PointIdx,
+    arc_start: PointIdx,
 }
 
 /// Line (0,0)-(10,0) and the arc through (10,0), (15,5), (10,10), each coordinate moved by `j`.
@@ -125,9 +125,9 @@ fn conflicting_dimensions_beside_the_tangent_joint_still_fail() {
 /// A line at y = 5 and a circle of radius 5 at the origin; the contact is a free point.
 struct FreePoint {
     sk: Sketch,
-    line: usize,
-    circle: usize,
-    p: usize,
+    line: CurveIdx,
+    circle: CurveIdx,
+    p: PointIdx,
 }
 
 fn free_point_contact(j: [f64; 8], tied_to_line_end: bool) -> FreePoint {

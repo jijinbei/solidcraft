@@ -117,7 +117,7 @@ fn geometry_independent_fixed_sketch_extrusions_reuse_only_their_geometry() {
     // An edit made directly before the move is not the model's evaluated input, even though
     // the command itself changes only placement. The proof must name the evaluated document.
     let sketch = session.doc.features.iter().find(|f| matches!(f.kind, crate::doc::FeatureKind::Sketch { .. })).unwrap().id;
-    session.doc_mut().sketch_mut(sketch).unwrap().points[1].pos.x += 1.;
+    session.doc_mut().sketch_mut(sketch).unwrap().points[solidcraft_sketch::PointIdx(1)].pos.x += 1.;
     let before = session.evaluations;
     run(&mut session, "occurrence.move", json!({"occurrence":occurrence,"translate":[1,0,0],"capture":true}));
     assert!(session.evaluations > before);

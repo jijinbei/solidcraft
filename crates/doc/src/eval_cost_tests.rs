@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use solidcraft_geom::{Plane, Vec2, Vec3};
 use solidcraft_kernel as kernel;
-use solidcraft_sketch::Sketch;
+use solidcraft_sketch::{PointIdx, Sketch};
 
 use crate::*;
 
@@ -200,7 +200,7 @@ fn a_sketch_on_a_fixed_plane_costs_the_same_in_a_large_placed_design() {
         assert_eq!(model.state().bodies.len(), parts * 2);
         // Editing the sketch again recomputes it alone, for the same cost.
         if let Ok(sk) = doc.sketch_mut(id)
-            && let Some(p) = sk.points.get_mut(1)
+            && let Some(p) = sk.points.get_mut(PointIdx(1))
         {
             p.pos = Vec2::new(12.0, 2.0);
         }
@@ -276,7 +276,7 @@ fn editing_a_sketch_on_a_turned_occurrence_reuses_its_frame_bodies() {
         let before = state_in_face_anchor_frame(&doc, &model.state_before(id), &anchor, 0).unwrap().bodies.first().unwrap().mesh();
 
         for to in [Vec2::new(4., 5.), Vec2::new(6., 7.)] {
-            doc.sketch_mut(id).unwrap().points.get_mut(1).unwrap().pos = to;
+            doc.sketch_mut(id).unwrap().points.get_mut(PointIdx(1)).unwrap().pos = to;
             let work = counted(|| model.evaluate(&doc));
             assert_eq!(work.moved, 0, "sketch edit must reuse the unchanged placement: {work:?}");
             assert_eq!(model.last_recomputed, 1);
@@ -307,7 +307,7 @@ fn editing_a_sketch_on_a_turned_occurrence_reuses_its_frame_bodies() {
 #[test]
 fn evaluations_that_move_nothing_keep_the_frame_bodies() {
     let (mut doc, mut model, _, id, _, _) = sketch_on_a_turned_occurrence();
-    let edit = |doc: &mut Document, to: Vec2| doc.sketch_mut(id).unwrap().points.get_mut(1).unwrap().pos = to;
+    let edit = |doc: &mut Document, to: Vec2| doc.sketch_mut(id).unwrap().points.get_mut(PointIdx(1)).unwrap().pos = to;
     edit(&mut doc, Vec2::new(4., 5.));
     let work = counted(|| model.evaluate(&doc));
     assert_eq!(work.moved, 0, "{work:?}");
@@ -636,7 +636,7 @@ fn shared_evaluation_refreshes_live_sketches_and_keeps_unknown_features_conserva
     assert!(!model.evaluate_shared(&doc));
     let solved = model.state().sketch(feature).unwrap().clone();
     let mut live = solved.sketch.clone();
-    live.points[1].pos.y += 2.;
+    live.points[PointIdx(1)].pos.y += 2.;
     assert!(model.show_live_sketch(feature, live, solved.report.clone()));
     assert!(model.is_stale());
     assert!(model.evaluate_shared(&doc));

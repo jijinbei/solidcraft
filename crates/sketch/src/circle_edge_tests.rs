@@ -9,7 +9,7 @@ use crate::*;
 
 /// A circle of radius `r` at `centre`, its radius set by a dimension; its centre fixed when
 /// `fixed`. The circle and its centre point.
-fn circle(sk: &mut Sketch, centre: Vec2, r: f64, fixed: bool) -> (usize, usize) {
+fn circle(sk: &mut Sketch, centre: Vec2, r: f64, fixed: bool) -> (CurveIdx, PointIdx) {
     let c = sk.add_circle(centre, r, None, None).unwrap();
     let CurveKind::Circle { c: ci, .. } = sk.curves[c].kind else { panic!("not a circle") };
     sk.add_constraint(ConstraintKind::Radius { c, value: r }, None).unwrap();
@@ -21,7 +21,7 @@ fn circle(sk: &mut Sketch, centre: Vec2, r: f64, fixed: bool) -> (usize, usize) 
 
 /// A fixed circle of radius 5 at (20, 15) and a point at `at`, kept level with the centre (so
 /// a distance from the centre places it). The circle, its centre and the point.
-fn circle_and_point(at: Vec2) -> (Sketch, usize, usize, usize) {
+fn circle_and_point(at: Vec2) -> (Sketch, CurveIdx, PointIdx, PointIdx) {
     let mut sk = Sketch::new();
     let (c, ci) = circle(&mut sk, v(20.0, 15.0), 5.0, true);
     let p = sk.add_point(at, None).unwrap();
@@ -31,7 +31,7 @@ fn circle_and_point(at: Vec2) -> (Sketch, usize, usize, usize) {
 
 /// A fixed circle of radius `ra` at the origin and a free circle of radius `rb` at (`x`, 0),
 /// level with it. The sketch, both circles and the free circle's centre.
-fn two_circles(ra: f64, x: f64, rb: f64) -> (Sketch, usize, usize, usize) {
+fn two_circles(ra: f64, x: f64, rb: f64) -> (Sketch, CurveIdx, CurveIdx, PointIdx) {
     let mut sk = Sketch::new();
     let (a, ca) = circle(&mut sk, v(0.0, 0.0), ra, true);
     let (b, cb) = circle(&mut sk, v(x, 0.0), rb, false);
@@ -150,8 +150,8 @@ fn nested_circles_keep_their_radius_order_after_diameter_edits() {
         for dimension_first in [false, true] {
             for drive_inner in [false, true] {
                 let mut sk = Sketch::new();
-                let outer = sk.add_circle(Vec2::ZERO, 20.0, Some(0), None).unwrap();
-                let inner = sk.add_circle(Vec2::ZERO, 10.0, Some(0), None).unwrap();
+                let outer = sk.add_circle(Vec2::ZERO, 20.0, Some(PointIdx::ORIGIN), None).unwrap();
+                let inner = sk.add_circle(Vec2::ZERO, 10.0, Some(PointIdx::ORIGIN), None).unwrap();
                 let (a, b) = if swap { (inner, outer) } else { (outer, inner) };
                 let wall = ConstraintKind::CircleCircleDistance { a, b, value: 10.0, circles: TwoCircles::Nested };
                 let diameter = ConstraintKind::Diameter { c: if drive_inner { inner } else { outer }, value: if drive_inner { 20.0 } else { 40.0 } };
@@ -232,12 +232,12 @@ fn the_dimensions_survive_a_round_trip_and_a_renumbering() {
     let apart = ConstraintKind::CircleCircleDistance { a, b, value: 1.0, circles: TwoCircles::Apart };
     assert!(serde_json::to_value(&apart).unwrap().get("circles").is_none());
     let mut k = outside;
-    assert!(k.remap(&|q| Some(q + 1), &|i| Some(i + 10)));
-    assert_eq!(k.indices(), (vec![p + 1], vec![a + 10]));
+    assert!(k.remap(&|q| Some(PointIdx(q.0 + 1)), &|i| Some(CurveIdx(i.0 + 10))));
+    assert_eq!(k.indices(), (vec![PointIdx(p.0 + 1)], vec![CurveIdx(a.0 + 10)]));
     assert!(!k.remap(&|_| None, &|i| Some(i)));
     let mut k = apart;
-    assert!(k.remap(&|q| Some(q), &|i| Some(i + 10)));
-    assert_eq!(k.indices(), (vec![], vec![a + 10, b + 10]));
+    assert!(k.remap(&|q| Some(q), &|i| Some(CurveIdx(i.0 + 10))));
+    assert_eq!(k.indices(), (vec![], vec![CurveIdx(a.0 + 10), CurveIdx(b.0 + 10)]));
     assert!(!k.remap(&|q| Some(q), &|_| None));
 }
 
@@ -252,8 +252,8 @@ fn the_seed_places_them_by_construction() {
     sk.add_constraint(ConstraintKind::DistanceX { p: ci, q: p, value: 5.0 }, None).unwrap();
     sk.add_constraint(ConstraintKind::PointCircleDistance { p, c, value: 8.0, inside: false }, None).unwrap();
     let out = crate::tests::seed_of(&sk);
-    assert!(out.placed_by[p].is_some_and(crate::construct::Placement::anchors), "{out:?}");
-    assert!(out.pos[p].unwrap().dist(v(25.0, 27.0)) < 1e-9, "{out:?}");
+    assert!(out.placed_by[p.0].is_some_and(crate::construct::Placement::anchors), "{out:?}");
+    assert!(out.pos[p.0].unwrap().dist(v(25.0, 27.0)) < 1e-9, "{out:?}");
     let rep = solve(&mut sk);
     assert!(rep.ok() && rep.dof == 0, "{rep:?}");
     assert!(sk.points[p].pos.dist(v(25.0, 27.0)) < 1e-9, "{:?}", sk.points[p].pos);
@@ -261,8 +261,8 @@ fn the_seed_places_them_by_construction() {
     let (mut sk, a, b, cb) = two_circles(5.0, 20.0, 3.0);
     sk.add_constraint(ConstraintKind::CircleCircleDistance { a, b, value: 4.0, circles: TwoCircles::Apart }, None).unwrap();
     let out = crate::tests::seed_of(&sk);
-    assert!(out.placed_by[cb].is_some_and(crate::construct::Placement::anchors), "{out:?}");
-    assert!(out.pos[cb].unwrap().dist(v(12.0, 0.0)) < 1e-9, "{out:?}");
+    assert!(out.placed_by[cb.0].is_some_and(crate::construct::Placement::anchors), "{out:?}");
+    assert!(out.pos[cb.0].unwrap().dist(v(12.0, 0.0)) < 1e-9, "{out:?}");
 }
 
 /// The dimension line runs between the edge points that face each other: from the edge to the

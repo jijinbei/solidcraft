@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec2;
 
-use crate::{ConstraintKind, Curve, CurveKind, Sketch, SketchError};
+use crate::{ConstraintKind, Curve, CurveIdx, CurveKind, PointIdx, Sketch, SketchError};
 
 /// Placement relative to the original, along a pattern direction's oriented line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,7 +351,7 @@ impl Sketch {
                     }
                     let Some(source) = self.curves.get(*seed).cloned() else { continue };
                     if let CurveKind::Arc { c, a, b } = source.kind {
-                        let mapped = |p: usize| {
+                        let mapped = |p: PointIdx| {
                             self.points
                                 .get(p)
                                 .and_then(|p| instance.points.iter().find(|(id, _)| *id == p.id))
@@ -468,7 +468,7 @@ impl Sketch {
 
 /// Keep sampled vector directions compatible with older designs, while picked lines are
 /// solver references. The default second direction follows the first line's perpendicular.
-fn linear_displacement(sk: &Sketch, kind: &SketchPatternKind, [i, j]: [usize; 2], fallback: Vec2) -> (Vec2, [Option<(usize, Vec2)>; 2]) {
+fn linear_displacement(sk: &Sketch, kind: &SketchPatternKind, [i, j]: [usize; 2], fallback: Vec2) -> (Vec2, [Option<(CurveIdx, Vec2)>; 2]) {
     let SketchPatternKind::Rectangular { dir, dir2, direction, direction2, spacing, spacing2, alignment, alignment2, reversed, reversed2, .. } = kind
     else {
         return (fallback, [None; 2]);
@@ -493,8 +493,8 @@ fn linear_displacement(sk: &Sketch, kind: &SketchPatternKind, [i, j]: [usize; 2]
     (offset, directions)
 }
 
-fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
-    let mut v: Vec<usize> = Vec::new();
+fn involved_points(sk: &Sketch, cs: &[CurveIdx], ps: &[PointIdx]) -> Vec<PointIdx> {
+    let mut v: Vec<PointIdx> = Vec::new();
     for c in cs {
         if let Some(k) = sk.curves.get(*c).map(|c| &c.kind) {
             v.extend(k.point_ids());
@@ -511,18 +511,23 @@ fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
 }
 
 /// Copy seed curves and their points, returning curves and the original-to-copy point map.
-fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) -> Vec2) -> Result<(Vec<usize>, Vec<(usize, usize)>), SketchError> {
+fn copy_through(
+    sk: &mut Sketch,
+    cs: &[CurveIdx],
+    ps: &[PointIdx],
+    f: &dyn Fn(Vec2) -> Vec2,
+) -> Result<(Vec<CurveIdx>, Vec<(PointIdx, PointIdx)>), SketchError> {
     if sk.curves.len().saturating_add(cs.len()) > crate::MAX_CURVES {
         return Err(crate::SketchError::TooLarge);
     }
     let pts = involved_points(sk, cs, ps);
-    let mut map: Vec<(usize, usize)> = Vec::new();
+    let mut map: Vec<(PointIdx, PointIdx)> = Vec::new();
     for q in &pts {
         let pos = sk.point(*q).unwrap_or_default();
         let n = sk.add_point(f(pos), None)?;
         map.push((*q, n));
     }
-    let m = |q: usize| map.iter().find(|x| x.0 == q).map(|x| x.1).unwrap_or(q);
+    let m = |q: PointIdx| map.iter().find(|x| x.0 == q).map(|x| x.1).unwrap_or(q);
     let mut made = Vec::new();
     for c in cs {
         let Some(cu) = sk.curves.get(*c).cloned() else { continue };
@@ -539,7 +544,7 @@ fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) ->
         let id = sk.fresh(prefix)?;
         // Copies retain the seed line's extent.
         let infinite = cu.infinite && matches!(kind, CurveKind::Line { .. });
-        sk.curves.push(Curve {
+        made.push(sk.curves.push(Curve {
             id,
             kind,
             construction: cu.construction,
@@ -548,8 +553,7 @@ fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) ->
             centerline: false,
             fixed: false,
             infinite,
-        });
-        made.push(sk.curves.len() - 1);
+        }));
     }
     Ok((made, map))
 }
