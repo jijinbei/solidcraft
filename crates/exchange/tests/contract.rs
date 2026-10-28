@@ -1,149 +1,48 @@
-//! The snapshot contract: what analysis tools rely on. Each design is built here with the
-//! document API, saved as a design file and opened through `solidcraft_exchange::open`; the
-//! expected values come from the geometry the design describes (box, hole, sphere), not from
-//! SolidCraft's own output.
+//! The snapshot contract: shapes, materials, parameters, determinism, the tagged 3MF, JSON and
+//! hostile input.
+
+mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::PI;
 
-use solidcraft_doc::{Dir, Document, FeatureKind, Model, Operation, UserMaterial, point_expr};
-use solidcraft_exchange::{Error, Options, Override, ParameterKind, Snapshot, Surface, Tolerance, from_json, open, to_json};
+use common::*;
+use solidcraft_doc::{FeatureKind, Model, Operation, UserMaterial, point_expr};
+use solidcraft_exchange::{
+    BodyName, Elasticity, Error, FaceName, MaterialAxes, Mm, Options, Override, ParameterValue, Point, Property, Quantity, Snapshot, Surface,
+    Tolerance, from_json, open, to_json,
+};
 use solidcraft_geom::Vec3;
 
-/// A `length` × 10 × 5 mm box at the origin, its length the user parameter `L`.
-fn box_doc(length: &str) -> Document {
-    let mut doc = Document::new("block");
-    doc.set_param("L", length, Some("mm"), None).unwrap();
-    doc.add_feature(
-        FeatureKind::Box {
-            corner: point_expr(Vec3::ZERO),
-            length: "L".into(),
-            width: "10".into(),
-            height: "5".into(),
-            operation: Operation::NewBody,
-        },
-        None,
-    )
-    .unwrap();
-    doc
-}
-
-/// A 20 × 20 × 10 mm box with a radius-3 hole through it along Z, at (10, 10).
-fn holed_doc() -> Document {
-    let mut doc = Document::new("plate");
-    doc.add_feature(
-        FeatureKind::Box {
-            corner: point_expr(Vec3::ZERO),
-            length: "20".into(),
-            width: "20".into(),
-            height: "10".into(),
-            operation: Operation::NewBody,
-        },
-        None,
-    )
-    .unwrap();
-    doc.add_feature(
-        FeatureKind::Cylinder {
-            base: point_expr(Vec3::new(10.0, 10.0, -1.0)),
-            axis: Dir(Vec3::Z),
-            radius: "3".into(),
-            height: "12".into(),
-            operation: Operation::Cut,
-            references: Vec::new(),
-        },
-        None,
-    )
-    .unwrap();
-    doc
-}
-
-/// A radius-8 sphere centred at (1, 2, 3).
-fn sphere_doc() -> Document {
-    let mut doc = Document::new("ball");
-    doc.add_feature(FeatureKind::Sphere { center: point_expr(Vec3::new(1.0, 2.0, 3.0)), radius: "8".into(), operation: Operation::NewBody }, None)
-        .unwrap();
-    doc
-}
-
-fn bytes(doc: &Document) -> Vec<u8> {
-    doc.to_json().into_bytes()
-}
-
-fn snap(doc: &Document) -> Snapshot {
-    open(&bytes(doc)).unwrap().snapshot(&[], &Options::default()).unwrap()
-}
-
-/// Volume enclosed by a closed mesh (divergence theorem).
-fn volume(positions: &[[f64; 3]], tris: impl Iterator<Item = [u32; 3]>) -> f64 {
-    tris.map(|[a, b, c]| {
-        let (a, b, c) = (positions[a as usize], positions[b as usize], positions[c as usize]);
-        a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])
-    })
-    .sum::<f64>()
-        / 6.0
-}
-
-fn body_volume(b: &solidcraft_exchange::Body) -> f64 {
-    volume(&b.positions, b.faces.iter().flat_map(|f| f.triangles.iter().copied()))
-}
-
-/// Each undirected edge is shared by exactly two triangles, once in each direction.
-fn watertight(b: &solidcraft_exchange::Body) -> bool {
-    let mut count: BTreeMap<(u32, u32), i32> = BTreeMap::new();
-    for [a, b2, c] in b.faces.iter().flat_map(|f| f.triangles.iter().copied()) {
-        for (p, q) in [(a, b2), (b2, c), (c, a)] {
-            *count.entry((p.min(q), p.max(q))).or_default() += if p < q { 1 } else { 1000 };
-        }
-    }
-    !count.is_empty() && count.values().all(|n| *n == 1001)
-}
-
-fn bbox(b: &solidcraft_exchange::Body) -> ([f64; 3], [f64; 3]) {
-    let mut lo = [f64::INFINITY; 3];
-    let mut hi = [f64::NEG_INFINITY; 3];
-    for p in &b.positions {
-        for k in 0..3 {
-            lo[k] = lo[k].min(p[k]);
-            hi[k] = hi[k].max(p[k]);
-        }
-    }
-    (lo, hi)
-}
-
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
-    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-}
-
-fn face_names(s: &Snapshot) -> BTreeSet<String> {
+fn face_names(s: &Snapshot) -> BTreeSet<FaceName> {
     s.bodies.iter().flat_map(|b| b.faces.iter().map(|f| f.name.clone())).collect()
 }
 
 #[test]
 fn a_box_is_six_named_outward_planes_closed_with_its_volume() {
     let s = snap(&box_doc("20 mm"));
-    assert_eq!((s.schema, s.unit.as_str(), s.design.as_str()), (1, "mm", "block"));
+    assert_eq!((s.schema, s.design.as_str()), (1, "block"));
     let [b] = s.bodies.as_slice() else { panic!("one body: {:?}", s.bodies.len()) };
-    assert_eq!(b.name, "Body1");
+    assert_eq!(b.name, *"Body1");
     assert!(b.closed && watertight(b));
     assert_eq!(b.faces.len(), 6);
     let centre = [10.0, 5.0, 2.5];
     for (i, f) in b.faces.iter().enumerate() {
-        assert_eq!(f.index as usize, i);
+        assert_eq!(f.index.index(), i);
         assert!(!f.triangles.is_empty(), "face {} has triangles", f.name);
-        let Surface::Plane { point, normal } = f.surface else { panic!("face {} is {:?}", f.name, f.surface) };
+        let Surface::Plane { point: Point(point), normal } = f.surface else { panic!("face {} is {:?}", f.name, f.surface) };
+        let normal = normal.get();
         // An axis direction, pointing away from the centre, and every vertex of the face on it.
         assert!(normal.iter().filter(|x| x.abs() > 1.0 - 1e-12).count() == 1, "{normal:?}");
-        let on = f.triangles.iter().flatten().map(|v| b.positions[*v as usize]).collect::<Vec<_>>();
-        let first = on[0];
-        assert!(dot([first[0] - centre[0], first[1] - centre[1], first[2] - centre[2]], normal) > 0.0, "outward");
+        let on: Vec<[f64; 3]> = f.triangles.iter().flatten().map(|v| at(b, *v)).collect();
+        assert!(dot(sub(on[0], centre), normal) > 0.0, "{} points outward", f.name);
         for p in on {
-            assert!(dot([p[0] - point[0], p[1] - point[1], p[2] - point[2]], normal).abs() < 1e-9);
+            assert!(dot(sub(p, point), normal).abs() < 1e-9);
         }
     }
     let names = face_names(&s);
     assert_eq!(names.len(), 6, "unique names: {names:?}");
-    assert!(names.iter().all(|n| n.starts_with('F')), "{names:?}");
-    assert!((body_volume(b) - 1000.0).abs() < 1e-9);
+    assert!((volume(b) - 1000.0).abs() < 1e-9);
     assert_eq!(bbox(b), ([0.0, 0.0, 0.0], [20.0, 10.0, 5.0]));
 }
 
@@ -152,28 +51,27 @@ fn a_hole_is_a_cylinder_face_with_its_axis_and_radius() {
     let doc = holed_doc();
     // A design container (`.sc`) opens as the JSON does.
     let container = solidcraft_io::write_design_container(&doc).unwrap();
-    let s = open(&container).unwrap().snapshot(&[], &Options::default()).unwrap();
+    let s = open(&container).unwrap().snapshot(&Options::default()).unwrap();
     assert_eq!(to_json(&s).unwrap(), to_json(&snap(&doc)).unwrap());
     let [b] = s.bodies.as_slice() else { panic!("one body") };
     assert!(b.closed && watertight(b));
-    let cylinders: Vec<_> = b.faces.iter().filter(|f| matches!(f.surface, Surface::Cylinder { .. })).collect();
-    assert!(!cylinders.is_empty());
-    for f in &cylinders {
-        let Surface::Cylinder { origin, axis, radius } = f.surface else { unreachable!() };
-        assert!((radius - 3.0).abs() < 1e-9 && (axis[2].abs() - 1.0).abs() < 1e-12);
+    let mut cylinders = 0;
+    for f in &b.faces {
+        let Surface::Cylinder { origin: Point(origin), axis, radius: Mm(radius) } = f.surface else { continue };
+        cylinders += 1;
+        assert!((radius - 3.0).abs() < 1e-9 && (axis.get()[2].abs() - 1.0).abs() < 1e-12);
         assert!((origin[0] - 10.0).abs() < 1e-9 && (origin[1] - 10.0).abs() < 1e-9, "{origin:?}");
-        // Its vertices lie on the cylinder.
         for v in f.triangles.iter().flatten() {
-            let p = b.positions[*v as usize];
+            let p = at(b, *v);
             assert!(((p[0] - 10.0).hypot(p[1] - 10.0) - 3.0).abs() < 1e-6);
         }
     }
-    let planes = b.faces.iter().filter(|f| matches!(f.surface, Surface::Plane { .. })).count();
-    assert_eq!(planes, 6);
+    assert!(cylinders > 0);
+    assert_eq!(b.faces.iter().filter(|f| matches!(f.surface, Surface::Plane { .. })).count(), 6);
     // The chord error removes at most (hole area × tolerance) from the hole.
     let exact = 20.0 * 20.0 * 10.0 - PI * 9.0 * 10.0;
     let tol = 2e-4 * (20f64 * 20.0 + 20.0 * 20.0 + 10.0 * 10.0).sqrt();
-    let v = body_volume(b);
+    let v = volume(b);
     assert!(v >= exact - 1e-9 && v - exact <= 2.0 * PI * 3.0 * 10.0 * tol, "{v} vs {exact}");
 }
 
@@ -182,35 +80,29 @@ fn a_sphere_is_a_sphere_face_with_its_centre_and_radius() {
     let s = snap(&sphere_doc());
     let [b] = s.bodies.as_slice() else { panic!("one body") };
     assert!(b.closed && watertight(b));
-    assert!(b.faces.iter().all(|f| matches!(f.surface, Surface::Sphere { .. })), "{:?}", b.faces);
     for f in &b.faces {
-        let Surface::Sphere { center, radius } = f.surface else { unreachable!() };
-        assert!((radius - 8.0).abs() < 1e-9);
-        assert!(dot(sub(center, [1.0, 2.0, 3.0]), sub(center, [1.0, 2.0, 3.0])) < 1e-18);
+        let Surface::Sphere { center: Point(center), radius: Mm(radius) } = f.surface else { panic!("{:?}", f.surface) };
+        assert!((radius - 8.0).abs() < 1e-9 && dist(center, [1.0, 2.0, 3.0]) < 1e-9);
     }
-    for p in &b.positions {
-        assert!((dot(sub(*p, [1.0, 2.0, 3.0]), sub(*p, [1.0, 2.0, 3.0])).sqrt() - 8.0).abs() < 1e-6);
+    for Point(p) in &b.positions {
+        assert!((dist(*p, [1.0, 2.0, 3.0]) - 8.0).abs() < 1e-6);
     }
     let exact = 4.0 / 3.0 * PI * 512.0;
     let tol = 2e-4 * 16.0 * 3f64.sqrt();
-    let v = body_volume(b);
+    let v = volume(b);
     assert!(v <= exact && exact - v <= 4.0 * PI * 64.0 * tol, "{v} vs {exact}");
     // A finer tolerance comes closer.
-    let fine = open(&bytes(&sphere_doc())).unwrap().snapshot(&[], &Options::default().with_tolerance(Tolerance::Absolute(0.001))).unwrap();
-    assert!(exact - body_volume(&fine.bodies[0]) < exact - v);
-}
-
-fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+    let fine = open(&bytes(&sphere_doc())).unwrap().snapshot(&Options::default().with_tolerance(Tolerance::Absolute(0.001))).unwrap();
+    assert!(exact - volume(&fine.bodies[0]) < exact - v);
 }
 
 #[test]
 fn materials_carry_density_and_card_properties() {
     let mut doc = box_doc("20 mm");
-    doc.add_feature(FeatureKind::Sphere { center: point_expr(Vec3::new(50.0, 0.0, 0.0)), radius: "4".into(), operation: Operation::NewBody }, None)
-        .unwrap();
-    doc.add_feature(FeatureKind::Sphere { center: point_expr(Vec3::new(80.0, 0.0, 0.0)), radius: "4".into(), operation: Operation::NewBody }, None)
-        .unwrap();
+    for x in [50.0, 80.0] {
+        doc.add_feature(FeatureKind::Sphere { center: point_expr(Vec3::new(x, 0.0, 0.0)), radius: "4".into(), operation: Operation::NewBody }, None)
+            .unwrap();
+    }
     let card = serde_json::json!({
         "schema_version": 1,
         "designation": "Test alloy",
@@ -231,23 +123,23 @@ fn materials_carry_density_and_card_properties() {
     doc.materials.insert("Body1".into(), "steel".into());
     doc.materials.insert("Body2".into(), "Alloy X".into());
     let s = snap(&doc);
-    let by_name: BTreeMap<&str, Option<&str>> = s.bodies.iter().map(|b| (b.name.as_str(), b.material.as_deref())).collect();
+    let by_name: BTreeMap<&str, Option<&str>> = s.bodies.iter().map(|b| (b.name.as_str(), b.material.as_ref().map(|m| m.as_str()))).collect();
     assert_eq!(by_name, BTreeMap::from([("Body1", Some("Steel")), ("Body2", Some("Alloy X")), ("Body3", None)]));
     let names: Vec<&str> = s.materials.iter().map(|m| m.name.as_str()).collect();
     assert_eq!(names, ["Alloy X", "Steel"]);
-    assert!((s.materials[1].density_kg_m3 - 7850.0).abs() < 1e-9 && s.materials[1].properties.is_empty());
+    assert!((s.materials[1].density_kg_m3.unwrap() - 7850.0).abs() < 1e-9 && s.materials[1].properties.is_empty());
     let alloy = &s.materials[0];
-    assert!((alloy.density_kg_m3 - 7500.0).abs() < 1e-9);
-    let elastic = alloy.properties.iter().find(|p| p.kind == "elasticity").unwrap();
-    assert_eq!(elastic.values.get("young_modulus_pa"), Some(&2.0e11));
-    assert_eq!(elastic.values.get("poisson_ratio"), Some(&0.3));
-    assert_eq!(elastic.values.get("temperature_k"), Some(&293.15));
-    assert_eq!(elastic.labels.get("symmetry").map(String::as_str), Some("isotropic"));
-    assert_eq!(elastic.labels.get("state").map(String::as_str), Some("annealed"));
-    let k = alloy.properties.iter().find(|p| p.kind == "thermal_conductivity").unwrap();
-    assert_eq!((k.values.get("w_m_k_1"), k.values.get("w_m_k_3")), (Some(&40.0), Some(&42.0)));
+    assert!((alloy.density_kg_m3.unwrap() - 7500.0).abs() < 1e-9);
+    let elastic = alloy.properties.iter().find(|p| matches!(p.property, Property::Elasticity { .. })).unwrap();
+    assert_eq!(elastic.property, Property::Elasticity { elasticity: Elasticity::Isotropic { young_modulus_pa: 2.0e11, poisson_ratio: 0.3 } });
+    assert_eq!(
+        (elastic.conditions.temperature_k, elastic.conditions.state.as_deref(), elastic.source.as_str()),
+        (Some(293.15), Some("annealed"), "s1")
+    );
+    let k = alloy.properties.iter().find(|p| matches!(p.property, Property::ThermalConductivity { .. })).unwrap();
+    assert_eq!(k.property, Property::ThermalConductivity { w_m_k: [40.0, 41.0, 42.0], axes: MaterialAxes::Material123 });
     // A body filter keeps only the bodies, and the materials, asked for.
-    let one = open(&bytes(&doc)).unwrap().snapshot(&[], &Options::default().with_bodies(vec!["Body1".into()])).unwrap();
+    let one = open(&bytes(&doc)).unwrap().snapshot(&Options::default().with_bodies(vec![BodyName::from("Body1")])).unwrap();
     assert_eq!(one.bodies.len(), 1);
     assert_eq!(one.materials.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), ["Steel"]);
 }
@@ -255,40 +147,37 @@ fn materials_carry_density_and_card_properties() {
 #[test]
 fn an_override_changes_the_dimension_and_keeps_the_face_names() {
     let design = open(&bytes(&box_doc("20 mm"))).unwrap();
-    let l = design.parameters().into_iter().find(|p| p.name == "L").unwrap();
-    assert_eq!((l.value, l.unit.as_str(), l.kind), (Some(20.0), "mm", ParameterKind::Length));
-    let before = design.snapshot(&[], &Options::default()).unwrap();
-    let after = design.snapshot(&[("L".into(), Override::Value(30.0))], &Options::default()).unwrap();
-    let as_expression = design.snapshot(&[("L".into(), Override::from("3 cm"))], &Options::default()).unwrap();
+    let l = design.parameters().into_iter().find(|p| p.name == *"L").unwrap();
+    assert_eq!((&l.value, l.display_unit.as_str()), (&ParameterValue::Quantity(Quantity::Length(Mm(20.0))), "mm"));
+    let before = design.snapshot(&Options::default()).unwrap();
+    let after = design.snapshot(&Options::default().with_override("L", Quantity::Length(Mm(30.0)))).unwrap();
+    let as_expression = design.snapshot(&Options::default().with_override("L", "3 cm")).unwrap();
     assert_eq!(after.bodies, as_expression.bodies);
-    assert_eq!(as_expression.parameters.iter().find(|p| p.name == "L").map(|p| (p.expression.as_str(), p.value)), Some(("3 cm", Some(30.0))));
-    assert!((body_volume(&before.bodies[0]) - 1000.0).abs() < 1e-9);
-    assert!((body_volume(&after.bodies[0]) - 1500.0).abs() < 1e-9);
+    let reported = as_expression.parameters.iter().find(|p| p.name == *"L").unwrap();
+    assert_eq!((reported.expression.as_str(), &reported.value), ("3 cm", &ParameterValue::Quantity(Quantity::Length(Mm(30.0)))));
+    assert!((volume(&before.bodies[0]) - 1000.0).abs() < 1e-9);
+    assert!((volume(&after.bodies[0]) - 1500.0).abs() < 1e-9);
     assert_eq!(bbox(&after.bodies[0]).1, [30.0, 10.0, 5.0]);
     assert_eq!(face_names(&before), face_names(&after));
-    let face_kinds = |s: &Snapshot| s.bodies[0].faces.iter().map(|f| (f.name.clone(), f.surface.clone())).collect::<Vec<_>>();
     // The same face keeps its name and its plane's direction.
-    for ((n0, s0), (n1, s1)) in face_kinds(&before).into_iter().zip(face_kinds(&after)) {
-        assert_eq!(n0, n1);
-        let (Surface::Plane { normal: a, .. }, Surface::Plane { normal: b, .. }) = (s0, s1) else { panic!() };
+    for (f0, f1) in before.bodies[0].faces.iter().zip(&after.bodies[0].faces) {
+        assert_eq!(f0.name, f1.name);
+        let (Surface::Plane { normal: a, .. }, Surface::Plane { normal: b, .. }) = (&f0.surface, &f1.surface) else { panic!() };
         assert_eq!(a, b);
     }
-    let reported = after.parameters.iter().find(|p| p.name == "L").unwrap();
-    assert_eq!(reported.value, Some(30.0));
     // The design itself is unchanged, and going back gives the first snapshot again.
-    assert_eq!(design.parameters().into_iter().find(|p| p.name == "L").unwrap().value, Some(20.0));
-    assert_eq!(to_json(&design.snapshot(&[], &Options::default()).unwrap()).unwrap(), to_json(&before).unwrap());
+    assert_eq!(design.parameters().into_iter().find(|p| p.name == *"L").unwrap().value, l.value);
+    assert_eq!(to_json(&design.snapshot(&Options::default()).unwrap()).unwrap(), to_json(&before).unwrap());
 }
 
 #[test]
 fn snapshots_are_byte_identical() {
     let doc = holed_doc();
     let a = to_json(&snap(&doc)).unwrap();
-    let b = to_json(&snap(&doc)).unwrap();
-    assert_eq!(a, b);
+    assert_eq!(a, to_json(&snap(&doc)).unwrap());
     let design = open(&bytes(&doc)).unwrap();
-    let c = to_json(&design.snapshot(&[], &Options::default()).unwrap()).unwrap();
-    let d = to_json(&design.snapshot(&[], &Options::default()).unwrap()).unwrap();
+    let c = to_json(&design.snapshot(&Options::default()).unwrap()).unwrap();
+    let d = to_json(&design.snapshot(&Options::default()).unwrap()).unwrap();
     assert_eq!((&a, &a), (&c, &d));
 }
 
@@ -324,15 +213,13 @@ fn the_tagged_3mf_export_and_the_snapshot_agree_on_faces() {
         let (objects, _) = solidcraft_io::read_3mf(&bytes).unwrap();
         let tagged = face_tags(&bytes);
         assert_eq!(objects.len(), s.bodies.len());
-        for (o, b) in objects.iter().zip(&s.bodies) {
-            assert_eq!(o.name, b.name);
-            assert!(o.tri_faces.iter().all(|f| (*f as usize) < b.faces.len()));
+        for ((o, b), tags) in objects.iter().zip(&s.bodies).zip(&tagged) {
+            assert_eq!(b.name, *o.name.as_str());
             let positions: Vec<[f64; 3]> = o.positions.iter().map(|p| [p.x, p.y, p.z]).collect();
-            assert_eq!(positions, b.positions);
-            let tags = &tagged[objects.iter().position(|x| x.name == o.name).unwrap()];
+            assert_eq!(positions, b.positions.iter().map(|p| p.0).collect::<Vec<_>>());
             assert_eq!(tags.len(), o.triangles.len());
             let mut theirs: Vec<(u32, [u32; 3])> = o.triangles.iter().zip(tags).map(|(t, f)| (*f, *t)).collect();
-            let mut ours: Vec<(u32, [u32; 3])> = b.faces.iter().flat_map(|f| f.triangles.iter().map(|t| (f.index, *t))).collect();
+            let mut ours: Vec<(u32, [u32; 3])> = b.faces.iter().flat_map(|f| f.triangles.iter().map(|t| (f.index.0, t.map(|v| v.0)))).collect();
             theirs.sort_unstable();
             ours.sort_unstable();
             assert_eq!(theirs, ours);
@@ -345,18 +232,26 @@ fn json_reads_back_and_tolerates_what_it_does_not_know() {
     let s = snap(&holed_doc());
     let text = to_json(&s).unwrap();
     assert_eq!(from_json(&text).unwrap(), s);
-    // An added field and an unknown surface kind read; a missing field is its default.
+    // Added fields and unknown kinds read; a missing field is its default.
     let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
     v["future_field"] = serde_json::json!({"x": 1});
     v["bodies"][0]["faces"][0]["surface"] = serde_json::json!({"type": "subdivision", "level": 3});
     v["bodies"][0]["faces"][0]["also_new"] = serde_json::json!(true);
-    v["parameters"] = serde_json::json!([{"name": "p", "kind": "complex"}]);
+    v["bodies"][0]["edges"][0]["curve"] = serde_json::json!({"type": "clothoid"});
+    v["features"][0]["kind"] = serde_json::json!({"type": "lattice", "cell": 4});
+    v["parameters"] = serde_json::json!([{"name": "p", "source": "plugin"}]);
     v["bodies"][0].as_object_mut().unwrap().remove("attributes");
     let read = from_json(&v.to_string()).unwrap();
     assert_eq!(read.bodies[0].faces[0].surface, Surface::Other);
-    assert_eq!(read.parameters[0].kind, ParameterKind::Other);
+    assert_eq!(read.bodies[0].edges[0].curve, solidcraft_exchange::Curve::Other);
+    assert_eq!(read.features[0].kind, solidcraft_exchange::FeatureKind::Other);
+    assert_eq!(read.parameters[0].source, solidcraft_exchange::ParameterSource::Other);
     assert!(read.bodies[0].attributes.is_empty());
+    // A direction must be one.
+    v["bodies"][0]["faces"][1]["surface"] = serde_json::json!({"type": "plane", "point": [0, 0, 0], "normal": [0, 0, 0]});
+    assert!(from_json(&v.to_string()).is_err());
     // A later, breaking schema is refused.
+    let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
     v["schema"] = serde_json::json!(2);
     assert!(matches!(from_json(&v.to_string()), Err(Error::NotSupported(_))));
 }
@@ -368,32 +263,38 @@ fn hostile_input_is_refused_without_panicking() {
     let mut doc = box_doc("20 mm");
     doc.text_params.push(solidcraft_doc::text_params::TextParam { name: "label".into(), text: "A".into(), comment: String::new() });
     let design = open(&bytes(&doc)).unwrap();
-    let o = Options::default();
+    let with = |name: &str, value: Override| design.snapshot(&Options::default().with_override(name, value));
+    let length = |v: f64| Override::Value(Quantity::Length(Mm(v)));
     for bad in [f64::NAN, f64::INFINITY, -f64::INFINITY, 1e300] {
-        assert!(matches!(design.snapshot(&[("L".into(), Override::Value(bad))], &o), Err(Error::Parameter(_))), "{bad}");
+        assert!(matches!(with("L", length(bad)), Err(Error::ParameterValue { .. })), "{bad}");
     }
-    assert!(matches!(design.snapshot(&[("nope".into(), Override::Value(1.0))], &o), Err(Error::Parameter(_))));
-    assert!(matches!(design.snapshot(&[("label".into(), Override::Value(1.0))], &o), Err(Error::Parameter(_))));
-    assert!(matches!(design.snapshot(&[("L".into(), Override::from("L * 2"))], &o), Err(Error::Parameter(_))), "circular");
-    assert!(matches!(design.snapshot(&[("L".into(), Override::from("1 +"))], &o), Err(Error::Parameter(_))));
-    assert!(matches!(design.snapshot(&[("L".into(), Override::from("\u{0}"))], &o), Err(Error::Parameter(_))));
-    assert!(matches!(design.snapshot(&[("L".into(), Override::from("1".repeat(5000).as_str()))], &o), Err(Error::Parameter(_))));
-    assert!(matches!(design.snapshot(&[("L".into(), 1.0.into()), ("L".into(), 2.0.into())], &o), Err(Error::Parameter(_))), "duplicate");
-    let many: Vec<(String, Override)> = (0..2000).map(|_| ("L".to_string(), Override::Value(1.0))).collect();
-    assert!(matches!(design.snapshot(&many, &o), Err(Error::Limit(_))));
+    assert!(matches!(with("nope", length(1.0)), Err(Error::UnknownParameter(_))));
+    assert!(matches!(with("label", length(1.0)), Err(Error::ParameterValue { .. })));
+    assert!(matches!(with("L", Override::Value(Quantity::Number(2.0))), Err(Error::ParameterValue { .. })), "a number for a length");
+    assert!(matches!(with("L", "L * 2".into()), Err(Error::Overrides(_))), "circular");
+    assert!(matches!(with("L", "1 +".into()), Err(Error::Overrides(_))));
+    assert!(matches!(with("L", "\u{0}".into()), Err(Error::ParameterValue { .. })));
+    assert!(matches!(with("L", "1".repeat(5000).as_str().into()), Err(Error::ParameterValue { .. })));
+    let twice = Options::default().with_override("L", length(1.0)).with_override("L", length(2.0));
+    assert!(matches!(design.snapshot(&twice), Err(Error::Overrides(_))), "duplicate");
+    let mut many = Options::default();
+    for _ in 0..2000 {
+        many = many.with_override("L", length(1.0));
+    }
+    assert!(matches!(design.snapshot(&many), Err(Error::Limit(_))));
     for t in [Tolerance::Relative(0.0), Tolerance::Relative(f64::NAN), Tolerance::Relative(5.0), Tolerance::Absolute(-1.0), Tolerance::Absolute(1e-9)]
     {
-        assert!(matches!(design.snapshot(&[], &Options::default().with_tolerance(t)), Err(Error::Invalid(_))), "{t:?}");
+        assert!(matches!(design.snapshot(&Options::default().with_tolerance(t)), Err(Error::Invalid(_))), "{t:?}");
     }
-    assert!(matches!(design.snapshot(&[], &Options::default().with_bodies(vec!["Body9".into()])), Err(Error::Invalid(_))));
-    // A value the feature cannot take fails the evaluation, naming the feature; the design
-    // still snapshots at its own values afterwards.
-    match design.snapshot(&[("L".into(), Override::Value(0.0))], &o) {
-        Err(Error::Evaluation(failed)) => assert!(!failed.is_empty()),
-        Err(Error::Parameter(_)) => {}
+    assert!(matches!(design.snapshot(&Options::default().with_bodies(vec!["Body9".into()])), Err(Error::NoBody(_))));
+    // A value the feature cannot take fails the evaluation, naming the feature; the design still
+    // snapshots at its own values afterwards.
+    match with("L", length(0.0)) {
+        Err(Error::Evaluation(failed)) => assert!(!failed.is_empty() && failed[0].id.0 > 0),
+        Err(Error::Overrides(_)) => {}
         other => panic!("a zero-length box: {other:?}"),
     }
-    assert_eq!(design.snapshot(&[], &o).unwrap().bodies.len(), 1);
+    assert_eq!(design.snapshot(&Options::default()).unwrap().bodies.len(), 1);
     // A text parameter takes a text.
-    assert!(design.snapshot(&[("label".into(), Override::from("\"B\""))], &o).is_ok());
+    assert!(with("label", "\"B\"".into()).is_ok());
 }

@@ -79,7 +79,7 @@ fn export_snapshot_writes_the_design_at_the_values_given() {
     let names = |s: &Value| s["bodies"][0]["faces"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     assert_eq!(names(&snapshot), names(&wide), "face names stay");
     let w = wide["parameters"].as_array().unwrap().iter().find(|p| p["name"] == "w").unwrap();
-    assert_eq!(w["value"].as_f64(), Some(35.0));
+    assert_eq!(w["value"]["quantity"]["length"].as_f64(), Some(35.0));
 }
 
 #[test]
@@ -117,15 +117,15 @@ fn export_snapshot_applies_suppressions_and_edits() {
     let out = dir.0.join("plain.json");
     assert!(export(&design, &out, &[]).status.success());
     let plain: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
-    let fillet = plain["features"].as_array().unwrap().iter().find(|f| f["type"] == "fillet").unwrap()["id"].as_u64().unwrap();
+    let fillet = plain["features"].as_array().unwrap().iter().find(|f| f["kind_name"] == "fillet").unwrap()["id"].as_u64().unwrap();
     let out = dir.0.join("sharp.json");
     let r = export(&design, &out, &["--suppress", &format!("F{fillet}")]);
     assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
     let sharp: Value = serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).unwrap();
     assert_eq!(sharp["bodies"][0]["faces"].as_array().unwrap().len(), 6);
-    assert_eq!(sharp["edits"][0]["kind"], "suppress");
+    assert_eq!(sharp["edits"][0]["edit"]["suppress"], fillet);
     let edits = dir.0.join("edits.json");
-    std::fs::write(&edits, r#"[{"partition": {"name": "Mid", "point": [5, 0, 0], "normal": [1, 0, 0]}}]"#).unwrap();
+    std::fs::write(&edits, r#"[{"partition": {"name": "Mid", "plane": {"point": [5, 0, 0], "normal": [1, 0, 0]}}}]"#).unwrap();
     let out = dir.0.join("cut.json");
     let r = export(&design, &out, &["--edits", edits.to_str().unwrap()]);
     assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));

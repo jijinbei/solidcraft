@@ -139,6 +139,36 @@ fn circle_through(s: &[Vec3], tol: f64) -> Option<EdgeCircle> {
     Some(EdgeCircle { center, axis, radius, start, end, angle })
 }
 
+/// A body's B-rep corners, and the corners each edge runs between.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Corners {
+    /// The corners' points, in the body's vertex order.
+    pub points: Vec<Vec3>,
+    /// Per edge (in the order of [`Body::edges`]): the corners at its start and end (the same
+    /// one for a closed edge), as indices into `points`.
+    pub ends: Vec<[usize; 2]>,
+}
+
+/// The corners of `b` and the edges' ends (empty for a mesh body).
+pub fn corners(b: &Body) -> Corners {
+    if b.mesh.is_some() {
+        return Corners::default();
+    }
+    let mut index = std::collections::HashMap::new();
+    let mut points = Vec::new();
+    for v in b.solid.vertex_iter() {
+        index.entry(v.id()).or_insert_with(|| {
+            points.push(from_p3(v.point()));
+            points.len() - 1
+        });
+    }
+    let ends = Body::unique_edges(&b.solid)
+        .iter()
+        .map(|e| [index.get(&e.front().id()).copied().unwrap_or(0), index.get(&e.back().id()).copied().unwrap_or(0)])
+        .collect();
+    Corners { points, ends }
+}
+
 /// A straight edge: its ends.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EdgeLine {

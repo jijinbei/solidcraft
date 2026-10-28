@@ -771,31 +771,35 @@ pub fn tagged_mesh(body: &solidcraft_kernel::Body, tolerance: f64) -> Result<Tag
     Ok(tagged_mesh_with_edges(body, tolerance)?.0)
 }
 
-/// [`tagged_mesh`] with the tessellation's B-rep edges: per edge (in the body's edge order) its
-/// polyline and the faces it bounds.
-pub fn tagged_mesh_with_edges(
-    body: &solidcraft_kernel::Body,
-    tolerance: f64,
-) -> Result<(TaggedMesh, Vec<Vec<solidcraft_geom::Vec3>>, Vec<Vec<u32>>)> {
+/// [`tagged_mesh`] with the body's B-rep edges, in its edge order: the welded vertices along
+/// each, in order (empty for an edge the mesh does not hold), and the faces it bounds.
+pub fn tagged_mesh_with_edges(body: &solidcraft_kernel::Body, tolerance: f64) -> Result<(TaggedMesh, Vec<Vec<u32>>, Vec<Vec<u32>>)> {
     if !(tolerance.is_finite() && tolerance > 0.0) {
         return Err(IoError::Invalid(format!("chord tolerance {tolerance} is not a positive number")));
     }
     let m = body.tessellate(tolerance)?;
-    let tagged = welded_tagged(body, &m)?.0;
-    Ok((tagged, m.edges, m.edge_faces))
+    let (tagged, _, paths) = welded_tagged_lines(body, &m, &m.edges)?;
+    Ok((tagged, paths, m.edge_faces))
 }
 
 /// `m` (a tessellation of `b`) welded as the 3MF export welds it, with each triangle's face, and
 /// the triangle of `m` each welded triangle came from (a split triangle's pieces keep it).
 fn welded_tagged(b: &solidcraft_kernel::Body, m: &Mesh) -> Result<(TaggedMesh, Vec<u32>)> {
+    let (tagged, origin, _) = welded_tagged_lines(b, m, &[])?;
+    Ok((tagged, origin))
+}
+
+/// [`welded_tagged`], and `lines` as welded vertex paths ([`threemf::weld_tagged_lines`]).
+fn welded_tagged_lines(b: &solidcraft_kernel::Body, m: &Mesh, lines: &[Vec<solidcraft_geom::Vec3>]) -> Result<(TaggedMesh, Vec<u32>, Vec<Vec<u32>>)> {
     // Weld with each triangle's own index as its tag: the pieces of a split triangle keep it,
     // and its colour and face follow from it.
     let n = u32::try_from(m.triangles.len()).map_err(|_| IoError::Invalid("mesh too large".into()))?;
-    let (positions, triangles, origin) = threemf::weld_tagged(&m.positions, &m.triangles, &(0..n).collect::<Vec<_>>(), weld_eps(b));
+    let (positions, triangles, origin, paths) =
+        threemf::weld_tagged_lines(&m.positions, &m.triangles, &(0..n).collect::<Vec<_>>(), weld_eps(b), lines);
     let tri_faces: Vec<u32> = origin.iter().map(|t| m.tri_face.get(*t as usize).copied().unwrap_or(0)).collect();
     let most = tri_faces.iter().max().map_or(0, |f| f.saturating_add(1));
     let faces = u32::try_from(b.face_count()).unwrap_or(u32::MAX).max(most);
-    Ok((TaggedMesh { positions, triangles, tri_faces, faces }, origin))
+    Ok((TaggedMesh { positions, triangles, tri_faces, faces }, origin, paths))
 }
 
 /// A body as a 3MF mesh: welded watertight (T-junctions split), coloured, and with `tagged`
