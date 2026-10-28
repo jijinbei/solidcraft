@@ -4256,6 +4256,7 @@ dependencies = [
  "log",
  "serde_json",
  "solidcraft-engine",
+ "solidcraft-exchange",
  "solidcraft-gpu",
  "solidcraft-mcp",
 ]
@@ -4305,6 +4306,20 @@ dependencies = [
  "thiserror 2.0.21",
  "toml_edit",
  "web-time",
+]
+
+[[package]]
+name = "solidcraft-exchange"
+version = "0.25.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "solidcraft-doc",
+ "solidcraft-geom",
+ "solidcraft-io",
+ "solidcraft-kernel",
+ "thiserror 2.0.21",
+ "zip",
 ]
 
 [[package]]

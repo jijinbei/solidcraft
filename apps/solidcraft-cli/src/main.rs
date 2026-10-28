@@ -4,6 +4,8 @@
 //! solidcraft-cli run <script.json|design.sc|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]
 //! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] (alias: inspect) measurements as JSON
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
+//! solidcraft-cli export-snapshot <design.sc> --out snapshot.json [--param NAME=VALUE]... [--tolerance MM | --relative-tolerance SHARE] [--body NAME]...
+//!                                                             the exchange snapshot analysis tools read (docs/formats/exchange-snapshot.md)
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
 //! solidcraft-cli bench-agent [--scale F] [--save F] [--script-out F] a ~1,300-body design built command by command, timed
 //! solidcraft-cli bench-assistant --connect 127.0.0.1:PORT [--token T] --base-url URL --model NAME [--tasks 1,2,5] [--repeat N]
@@ -62,6 +64,8 @@ const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> 
 const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n";
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
+/// `export-snapshot`'s lines in the usage.
+const USAGE_EXPORT_SNAPSHOT: &str = "  solidcraft-cli export-snapshot <design.sc> --out snapshot.json [--param NAME=VALUE]... [--tolerance MM | --relative-tolerance SHARE] [--body NAME]...\n      (the design evaluated at the parameter values given, as the exchange snapshot analysis tools read: parameters, materials,\n       a welded mesh per body with named, typed faces; docs/formats/exchange-snapshot.md. VALUE is a number in the parameter's\n       own unit or an expression (`3 cm`, `width / 2`); --tolerance is the chord tolerance in mm, --relative-tolerance a share\n       of each body's size (default 2e-4); --body keeps only the bodies named; the JSON is the same bytes for the same input)\n";
 /// `bench-open`'s lines in the usage.
 const USAGE_BENCH_OPEN: &str = "  solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json]\n      (--ops: after opening, run each command of the script and undo it, timing the command, the\n       evaluations it caused and the view it leaves: placing and meshing what changed)\n";
 /// `bench-agent`'s lines in the usage.
@@ -108,6 +112,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "eval", usage: USAGE_EVAL, listed: true },
     Command { name: "inspect", usage: USAGE_EVAL, listed: false },
     Command { name: "script", usage: USAGE_SCRIPT, listed: true },
+    Command { name: "export-snapshot", usage: USAGE_EXPORT_SNAPSHOT, listed: true },
     Command { name: "bench-open", usage: USAGE_BENCH_OPEN, listed: true },
     Command { name: "bench-agent", usage: USAGE_BENCH_AGENT, listed: true },
     Command { name: "bench-assistant", usage: USAGE_BENCH_ASSISTANT, listed: true },
@@ -147,6 +152,7 @@ fn main() -> ExitCode {
         Some("run") => cmd_run(&args[1..]),
         Some("eval" | "inspect") => cmd_eval(&args[1..]),
         Some("script") => cmd_script(&args[1..]),
+        Some("export-snapshot") => cmd_export_snapshot(&args[1..]),
         Some("snapshot") => cmd_snapshot(&args[1..]),
         Some("render") => render::run(&args[1..]),
         Some("exec") => cmd_exec(&args[1..]),
@@ -501,6 +507,49 @@ fn cmd_script(args: &[String]) -> Result<(), String> {
         Some(out) => eprintln!("{out}: {} steps", r["steps"]),
         None => println!("{}", pretty(&r["script"])),
     }
+    Ok(())
+}
+
+/// `export-snapshot`: a design file evaluated at the given parameter values and written as the
+/// exchange snapshot's JSON (solidcraft-exchange).
+fn cmd_export_snapshot(args: &[String]) -> Result<(), String> {
+    use solidcraft_exchange::{Options, Override, Tolerance};
+    known_args("export-snapshot", args, &["--out", "--param", "--tolerance", "--relative-tolerance", "--body"], &[], true)?;
+    let path = positional(args).ok_or_else(|| command_usage("export-snapshot"))?;
+    let out = flag(args, "--out").ok_or("export-snapshot: --out FILE is required")?;
+    let bytes = solidcraft_engine::io::vfs::read(path, solidcraft_exchange::MAX_DESIGN_BYTES).map_err(|e| format!("{path}: {e}"))?;
+    let design = solidcraft_exchange::open(&bytes).map_err(|e| format!("{path}: {e}"))?;
+    let mut overrides = Vec::new();
+    for p in flags(args, "--param") {
+        let (name, value) = p.split_once('=').ok_or_else(|| format!("--param {p}: expected NAME=VALUE"))?;
+        let value = value.trim();
+        let value = match value.parse::<f64>() {
+            Ok(v) => Override::Value(v),
+            Err(_) => Override::Expression(value.to_string()),
+        };
+        overrides.push((name.trim().to_string(), value));
+    }
+    let number = |flag_name: &str| -> Result<Option<f64>, String> {
+        flag(args, flag_name).map(|t| t.parse::<f64>().map_err(|_| format!("{flag_name} {t}: expected a number"))).transpose()
+    };
+    let mut options = Options::default();
+    match (number("--tolerance")?, number("--relative-tolerance")?) {
+        (Some(_), Some(_)) => return Err("export-snapshot: give --tolerance or --relative-tolerance, not both".into()),
+        (Some(mm), None) => options = options.with_tolerance(Tolerance::Absolute(mm)),
+        (None, Some(share)) => options = options.with_tolerance(Tolerance::Relative(share)),
+        (None, None) => {}
+    }
+    let bodies = flags(args, "--body");
+    if !bodies.is_empty() {
+        options = options.with_bodies(bodies.iter().map(|b| b.to_string()).collect());
+    }
+    let snapshot = design.snapshot(&overrides, &options).map_err(|e| format!("{path}: {e}"))?;
+    let mut text = solidcraft_exchange::to_json(&snapshot).map_err(|e| e.to_string())?;
+    text.push('\n');
+    solidcraft_engine::io::write_atomic(std::path::Path::new(out), text.as_bytes(), false).map_err(|e| format!("{out}: {e}"))?;
+    let faces: usize = snapshot.bodies.iter().map(|b| b.faces.len()).sum();
+    let triangles: usize = snapshot.bodies.iter().flat_map(|b| &b.faces).map(|f| f.triangles.len()).sum();
+    eprintln!("{out}: {} bodies, {faces} faces, {triangles} triangles", snapshot.bodies.len());
     Ok(())
 }
 
