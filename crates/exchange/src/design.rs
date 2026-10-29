@@ -10,7 +10,7 @@ use crate::convert::{self, Budget};
 use crate::error::{Error, FeatureFailure, Result};
 use crate::options::{Options, Override, Tolerance};
 use crate::schema::{
-    AppliedEdit, BodyName, Edit, FeatureId, LengthUnit, Parameter, ParameterName, ParameterValue, Plane, Quantity, SCHEMA, Snapshot,
+    AppliedEdit, BodyName, Edit, Failure, FeatureId, LengthUnit, Parameter, ParameterName, ParameterValue, Plane, Quantity, SCHEMA, Snapshot,
 };
 use crate::{
     MAX_BODIES, MAX_CONTROL_POINTS, MAX_EDITS, MAX_EXPRESSION_BYTES, MAX_FACES, MAX_NAME_BYTES, MAX_OVERRIDES, MAX_TOLERANCE_MM, MAX_TRIANGLES,
@@ -42,9 +42,10 @@ impl Design {
     /// features fail.
     pub fn snapshot(&self, options: &Options) -> Result<Snapshot> {
         let tolerance = checked_tolerance(options.tolerance)?;
+        let allowed = options.failures_allowed;
         let mut doc = self.with_overrides(&options.overrides)?;
-        let edits = self.apply_edits(&mut doc, &options.edits)?;
-        let state = self.evaluate(&doc)?;
+        let edits = self.apply_edits(&mut doc, &options.edits, allowed)?;
+        let (state, failed) = self.evaluate_allowing(&doc, allowed)?;
         let world = solidcraft_doc::world_state(&doc, &state);
         if let Some(wanted) = &options.bodies {
             if wanted.len() > MAX_BODIES {
@@ -60,7 +61,7 @@ impl Design {
             return Err(Error::Limit(format!("{} bodies, over {MAX_BODIES}", chosen.len())));
         }
         let mut budget = Budget { faces: MAX_FACES, triangles: MAX_TRIANGLES, control_points: MAX_CONTROL_POINTS };
-        let bodies = chosen.into_iter().map(|b| convert::body(&doc, b, tolerance, &mut budget)).collect::<Result<Vec<_>>>()?;
+        let bodies = chosen.into_iter().map(|b| convert::body(&doc, b, tolerance, options.mass, &mut budget)).collect::<Result<Vec<_>>>()?;
         let used: BTreeSet<&str> = bodies.iter().filter_map(|b| b.material.as_ref().map(|m| m.as_str())).collect();
         let materials = used.into_iter().map(|m| convert::material(&doc, m)).collect();
         let features = convert::features(&doc, &state, &bodies);
@@ -73,11 +74,12 @@ impl Design {
             bodies,
             features,
             edits,
+            failures: failed.into_iter().map(|f| Failure { feature: f.id, name: f.name, message: f.message }).collect(),
         })
     }
 
-    /// The model at `doc`, refused when a timeline feature fails.
-    fn evaluate(&self, doc: &Document) -> Result<Arc<ModelState>> {
+    /// The model at `doc` and the features that failed; refused when one does, unless `allowed`.
+    fn evaluate_allowing(&self, doc: &Document, allowed: bool) -> Result<(Arc<ModelState>, Vec<FeatureFailure>)> {
         let mut model = self.model.lock().unwrap_or_else(|e| e.into_inner());
         model.evaluate(doc);
         let failed: Vec<FeatureFailure> = model
@@ -85,10 +87,10 @@ impl Design {
             .iter()
             .filter_map(|r| r.error.as_ref().map(|e| FeatureFailure { id: FeatureId(r.id), name: r.name.clone(), message: e.clone() }))
             .collect();
-        if !failed.is_empty() {
+        if !failed.is_empty() && !allowed {
             return Err(Error::Evaluation(failed));
         }
-        Ok(model.state())
+        Ok((model.state(), failed))
     }
 
     /// A copy of the design with the overrides applied, all or none.
@@ -136,7 +138,7 @@ impl Design {
     /// `edits` made to `doc`, in order: suppressions set on their features, partitions and face
     /// splits added as features at the end of the timeline, each from the model the edits
     /// before it left.
-    fn apply_edits(&self, doc: &mut Document, edits: &[Edit]) -> Result<Vec<AppliedEdit>> {
+    fn apply_edits(&self, doc: &mut Document, edits: &[Edit], allowed: bool) -> Result<Vec<AppliedEdit>> {
         if edits.len() > MAX_EDITS {
             return Err(Error::Limit(format!("{} edits, over {MAX_EDITS}", edits.len())));
         }
@@ -149,7 +151,7 @@ impl Design {
                 }
                 Edit::Partition { name, plane, bodies } => {
                     let cut_plane = edit_plane("partition", name, plane)?;
-                    let state = self.evaluate(doc)?;
+                    let (state, _) = self.evaluate_allowing(doc, allowed)?;
                     if let Some(missing) = bodies.iter().find(|b| state.body(b.as_str()).is_none()) {
                         return Err(Error::NoBody(missing.clone()));
                     }
@@ -177,7 +179,7 @@ impl Design {
                 }
                 Edit::SplitFace { name, body, face, plane } => {
                     let cut_plane = edit_plane("split_face", name, plane)?;
-                    let state = self.evaluate(doc)?;
+                    let (state, _) = self.evaluate_allowing(doc, allowed)?;
                     if state.body(body.as_str()).is_none() {
                         return Err(Error::NoBody(body.clone()));
                     }

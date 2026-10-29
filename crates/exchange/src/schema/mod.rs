@@ -23,7 +23,7 @@ mod validate;
 
 use serde::{Deserialize, Serialize};
 
-pub use body::{Body, Bounds, ControlPoint, Curve, Edge, Face, Knots, Surface, Vertex};
+pub use body::{Body, Bounds, ControlPoint, Curve, Edge, Face, Knots, Mass, Surface, Vertex};
 pub use edit::{AppliedEdit, Edit};
 pub use feature::{Feature, FeatureKind, Input, Operation, Profile, Sketch, SketchCurve};
 pub use geometry::{Direction, Frame, LengthUnit, Mm, Plane, Point, Point2, Quantity, Radians, Transform};
@@ -54,6 +54,19 @@ pub struct Snapshot {
     pub features: Vec<Feature>,
     /// The edits the snapshot was taken with, in the order given.
     pub edits: Vec<AppliedEdit>,
+    /// Timeline features that failed, when the snapshot was taken with failures allowed
+    /// ([`crate::Options::with_failures_allowed`]); the bodies are what the rest built.
+    pub failures: Vec<Failure>,
+}
+
+/// A timeline feature that failed to build.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct Failure {
+    pub feature: FeatureId,
+    pub name: String,
+    pub message: String,
 }
 
 impl Snapshot {

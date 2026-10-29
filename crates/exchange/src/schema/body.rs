@@ -31,6 +31,29 @@ pub struct Body {
     pub vertices: Vec<Vertex>,
     /// Key/value data for downstream tools (empty for now).
     pub attributes: BTreeMap<String, String>,
+    /// The kernel's size of the body: the diagonal of its B-rep vertices' bounding box (curved
+    /// faces may bulge past it). For default tolerances and sizes.
+    pub size: Mm,
+    /// The boundary shells: one for a solid in one piece without voids.
+    pub shells: u32,
+    /// Mass properties from the kernel, when asked for ([`crate::Options::with_mass`]).
+    pub mass: Option<Mass>,
+}
+
+/// A body's mass properties, as the kernel measures them (converged tessellations, closer than
+/// the snapshot's own mesh).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+#[non_exhaustive]
+pub struct Mass {
+    /// mm³.
+    pub volume: f64,
+    /// mm².
+    pub area: f64,
+    pub centroid: Point,
+    /// The bounding box's corners.
+    pub min: Point,
+    pub max: Point,
 }
 
 /// One B-rep face and its triangles.
@@ -45,6 +68,9 @@ pub struct Face {
     pub triangles: Vec<[MeshVertex; 3]>,
     /// The features that made or shaped the face, in the order its name mentions them.
     pub features: Vec<FeatureId>,
+    /// The name was worked out from the geometry rather than followed through the history the
+    /// design recorded, so an upstream edit can fool it.
+    pub inferred: bool,
     /// Key/value data for downstream tools (empty for now).
     pub attributes: BTreeMap<String, String>,
 }

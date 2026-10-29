@@ -10,8 +10,8 @@ use super::Budget;
 use crate::error::{Error, Result};
 use crate::options::Tolerance;
 use crate::schema::{
-    Body, BodyName, Bounds, ControlPoint, Curve, Direction, Edge, EdgeIndex, EdgeName, Face, FaceIndex, FaceName, Knots, MaterialName, MeshVertex,
-    Mm, Point, Radians, Surface, Vertex, VertexIndex, VertexName,
+    Body, BodyName, Bounds, ControlPoint, Curve, Direction, Edge, EdgeIndex, EdgeName, Face, FaceIndex, FaceName, Knots, Mass, MaterialName,
+    MeshVertex, Mm, Point, Radians, Surface, Vertex, VertexIndex, VertexName,
 };
 use crate::{MAX_CONTROL_POINTS, MAX_FACES, MAX_TRIANGLES, MIN_TOLERANCE_MM};
 
@@ -27,7 +27,7 @@ fn index32(i: usize) -> u32 {
     u32::try_from(i).unwrap_or(u32::MAX)
 }
 
-pub(crate) fn body(doc: &Document, b: &ModelBody, tolerance: Tolerance, budget: &mut Budget) -> Result<Body> {
+pub(crate) fn body(doc: &Document, b: &ModelBody, tolerance: Tolerance, mass: bool, budget: &mut Budget) -> Result<Body> {
     let tol = match tolerance {
         Tolerance::Relative(r) => (b.body.size() * r).max(MIN_TOLERANCE_MM),
         Tolerance::Absolute(a) => a,
@@ -61,6 +61,7 @@ pub(crate) fn body(doc: &Document, b: &ModelBody, tolerance: Tolerance, budget: 
         faces.push(Face {
             index: FaceIndex(index32(i)),
             features: super::features::feature_ids(&name),
+            inferred: !solidcraft_doc::naming::face_name_exact(b, i),
             name: FaceName(name),
             surface: surface(&b.body, i, budget, &b.name)?,
             triangles,
@@ -131,7 +132,16 @@ pub(crate) fn body(doc: &Document, b: &ModelBody, tolerance: Tolerance, budget: 
         })
         .collect();
 
+    let mass = if mass {
+        let m = solidcraft_kernel::measure_mass(&b.body).map_err(|e| Error::Invalid(format!("body {}: mass properties: {e}", b.name)))?;
+        Some(Mass { volume: m.volume, area: m.area, centroid: point(m.centroid), min: point(m.bbox.min), max: point(m.bbox.max) })
+    } else {
+        None
+    };
     Ok(Body {
+        size: Mm(b.body.size()),
+        shells: index32(b.body.shell_count()),
+        mass,
         name: BodyName(b.name.clone()),
         material: assigned_material(doc, b).map(MaterialName),
         closed: is_closed(&mesh.triangles),

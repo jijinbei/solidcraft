@@ -4310,7 +4310,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-exchange"
-version = "0.25.1"
+version = "0.26.1"
 dependencies = [
  "serde",
  "serde_json",

@@ -47,6 +47,8 @@ pub use schema::*;
 
 /// Largest design file [`open`] reads (the design reader's own limit).
 pub const MAX_DESIGN_BYTES: usize = solidcraft_io::MAX_DESIGN_BYTES;
+/// The newest design format [`open`] reads (`"format": "solidcraft/N"`), the one SolidCraft writes.
+pub const DESIGN_FORMAT: u32 = solidcraft_doc::format::FORMAT;
 /// Most parameter overrides one snapshot takes.
 pub const MAX_OVERRIDES: usize = 1024;
 /// Longest override expression (bytes).

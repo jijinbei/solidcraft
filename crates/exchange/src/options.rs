@@ -63,6 +63,13 @@ pub struct Options {
     /// Only these bodies; all when `None`.
     pub bodies: Option<Vec<BodyName>>,
     pub edits: Vec<Edit>,
+    /// Measure each body's mass properties ([`crate::schema::Body::mass`]); off by default, as
+    /// it tessellates each body three more times.
+    pub mass: bool,
+    /// Take the snapshot even when timeline features fail, listing them in
+    /// [`crate::schema::Snapshot::failures`]; off: a failing feature is
+    /// [`crate::Error::Evaluation`].
+    pub failures_allowed: bool,
 }
 
 impl Options {
@@ -88,6 +95,18 @@ impl Options {
     #[must_use]
     pub fn with_edits(mut self, edits: Vec<Edit>) -> Self {
         self.edits = edits;
+        self
+    }
+
+    #[must_use]
+    pub fn with_mass(mut self, mass: bool) -> Self {
+        self.mass = mass;
+        self
+    }
+
+    #[must_use]
+    pub fn with_failures_allowed(mut self, allowed: bool) -> Self {
+        self.failures_allowed = allowed;
         self
     }
 }

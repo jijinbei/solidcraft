@@ -366,3 +366,41 @@ fn bodies_are_walked_by_reference() {
 fn norm(v: [f64; 3]) -> f64 {
     dot(v, v).sqrt()
 }
+
+#[test]
+fn mass_size_shells_and_failures_come_when_asked() {
+    let design = open(&bytes(&holed_doc())).unwrap();
+    let plain = design.snapshot(&Options::default()).unwrap();
+    let b = &plain.bodies[0];
+    assert_eq!(b.mass, None);
+    assert_eq!(b.shells, 1);
+    // The kernel's size: the diagonal of the 20 × 20 × 10 box's corners.
+    assert!((b.size.0 - (20f64 * 20.0 + 20.0 * 20.0 + 10.0 * 10.0).sqrt()).abs() < 1e-9, "{}", b.size);
+    assert!(b.faces.iter().all(|f| !f.inferred));
+    let measured = design.snapshot(&Options::default().with_mass(true)).unwrap();
+    let m = measured.bodies[0].mass.unwrap();
+    let volume = 20.0 * 20.0 * 10.0 - std::f64::consts::PI * 9.0 * 10.0;
+    assert!((m.volume - volume).abs() < 1e-3 * volume, "{} vs {volume}", m.volume);
+    assert!((m.centroid.0[0] - 10.0).abs() < 1e-6 && (m.max.0[2] - 10.0).abs() < 1e-9, "{m:?}");
+    // A failing feature: refused by default, listed with failures allowed, the rest built.
+    let mut doc = holed_doc();
+    doc.set_param("L", "0", Some("mm"), None).unwrap();
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(30.0, 0.0, 0.0)),
+            length: "L".into(),
+            width: "1".into(),
+            height: "1".into(),
+            operation: Operation::NewBody,
+        },
+        None,
+    )
+    .unwrap();
+    let design = open(&bytes(&doc)).unwrap();
+    assert!(matches!(design.snapshot(&Options::default()), Err(Error::Evaluation(_))));
+    let partial = design.snapshot(&Options::default().with_failures_allowed(true)).unwrap();
+    assert_eq!(partial.failures.len(), 1, "{:?}", partial.failures);
+    assert!(partial.failures[0].feature.0 > 0 && !partial.failures[0].message.is_empty());
+    assert_eq!(partial.bodies.len(), 1);
+    assert!(plain.failures.is_empty());
+}

@@ -31,7 +31,9 @@ let json = solidcraft_exchange::to_json(&snap)?;          // deterministic bytes
 `snapshot` applies the overrides (all or none), then the edits, to a copy of the design,
 evaluates it and leaves the design as it was. Snapshots of one `Design` share an evaluation, so
 a second snapshot recomputes only the features its overrides and edits reach. A feature that
-fails fails the snapshot (`Error::Evaluation`, each failure with its feature id). Errors are
+fails fails the snapshot (`Error::Evaluation`, each failure with its feature id), unless the options
+allow failures (`with_failures_allowed(true)`): then the snapshot holds what the rest of the
+timeline built and lists the failed features in `failures` (`feature`, `name`, `message`). Errors are
 typed: `UnknownParameter`, `ParameterValue`, `Overrides`, `NoFeature`, `NoBody`, `NoFace`,
 `Invalid`, `Limit`, `Read`, `NotSupported`.
 
@@ -123,7 +125,12 @@ objects (`{"type": "cylinder", …}`), each with an `other` for kinds the reader
   `yield_strength`, `shear_strength` (`pa`), `thermal_conductivity` (`w_m_k` per axis),
   `thermal_expansion` (`per_k` per axis), `specific_heat` (`j_kg_k`), each with the
   `conditions` it holds at and its card `source`.
-- **Bodies.** In world coordinates, in the design's order. In an assembly every placement of a
+- **Bodies.** In world coordinates, in the design's order. Each has the kernel's `size` (the
+  diagonal of its B-rep vertices' bounding box) and `shells` (boundary shells: 1 for a solid in
+  one piece without voids), and with `with_mass(true)` its `mass` (`volume`, `area`, `centroid`,
+  bounding box `min` and `max`) as the kernel measures it from converged tessellations. A face's
+  `inferred` is true when its name was worked out from the geometry rather than followed through
+  the design's history. In an assembly every placement of a
   component's body is its own body: the first keeps the body's name, every further one adds its
   occurrence path in brackets (`Body1 [Arm:2]`).
 - **Mesh.** One tessellation per body, the one the tagged 3MF export writes
