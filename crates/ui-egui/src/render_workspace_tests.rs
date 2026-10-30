@@ -1616,7 +1616,9 @@ fn clicked_render_workspace_saves_one_setup_and_restores_design_view() {
         assert!(h.widget(&heading).is_some(), "{language}");
         h.step(&json!({"click":{"handle":"render:scene:frame"}})).unwrap();
         assert_eq!(h.app.render_workspace.view.inspector.page, inspector::Page::Camera);
-        h.step(&json!({"widget":perspective})).unwrap();
+        // The inspector's checkbox, on the right: the stage above the view has a Perspective too.
+        let at = h.widgets(&perspective).into_iter().max_by(|a, b| a[0].total_cmp(&b[0])).unwrap();
+        h.step(&json!({"click":at})).unwrap();
         assert_eq!(h.app.cam.fov, 50f64.to_radians(), "{language}: Perspective takes the Field of view preference's angle (#5364)");
         assert!(!h.app.session.is_dirty(), "preview edits are staged");
         h.step(&json!({"widget":save})).unwrap();
