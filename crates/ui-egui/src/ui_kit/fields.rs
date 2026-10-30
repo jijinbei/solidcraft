@@ -1124,6 +1124,8 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     // sketch picks. Keep the former line + space_2 above/below, with shared galley alignment.
     let height = ui.fonts_mut(|fonts| fonts.row_height(&font)) + ui.spacing().extra_text_line_spacing + t.space_4;
     let width = grown_width(ui, value, &font, t.control_height * 3.0 - t.space_6);
+    // egui 0.37 floors a text edit's height at the theme's interact height: lower it for this one.
+    let interact = std::mem::replace(&mut ui.spacing_mut().interact_size.y, height);
     let mut response = ui.add(
         text_input(egui::TextEdit::singleline(value))
             .id(id)
@@ -1136,6 +1138,7 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
             .text_color(t.form_ink)
             .clip_text(true),
     );
+    ui.spacing_mut().interact_size.y = interact;
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     publish(ui, &response, egui::Role::TextInput);
     response.widget_info(|| {
