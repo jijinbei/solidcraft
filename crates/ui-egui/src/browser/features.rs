@@ -143,7 +143,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     let mut slots: Vec<(f32, usize)> = Vec::new();
     // Where dragged rows can be dropped, as in the History at the left: these slots and one
     // before the marker, each with the folder the rows join (#9565).
-    let drag_id = egui::Id::new(("sc_browser_history_drag", &scope));
+    let drag_id = egui::Id::unique(("sc_browser_history_drag", &scope));
     let mut dragged: Option<Vec<u64>> = ui.data(|d| d.get_temp(drag_id));
     let mut drops: Vec<DropSlot> = Vec::new();
     let mut marker_resp = None;

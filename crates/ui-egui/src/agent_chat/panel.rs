@@ -1325,8 +1325,7 @@ fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOpti
     } else if option.category == "mode" {
         crate::scenario::publish_handle("agent_chat:mode", response.rect.center());
     }
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, !pending && !option.options.is_empty(), format!("{name}: {selected}")));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, !pending && !option.options.is_empty(), format!("{name}: {selected}")));
     response.on_hover_text(tip);
     if let Some(value) = picked {
         super::set_config_option(app, &option.id, &value);
