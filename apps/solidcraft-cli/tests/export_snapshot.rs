@@ -70,12 +70,12 @@ fn export_snapshot_writes_the_design_at_the_values_given() {
     let faces = snapshot["bodies"][0]["faces"].as_array().unwrap();
     assert_eq!(faces.len(), 7, "six planes and the fillet");
     assert!(faces.iter().any(|f| f["surface"]["type"] == "cylinder" && (f["surface"]["radius"].as_f64().unwrap() - 2.0).abs() < 1e-9));
-    assert_eq!(largest_x(&snapshot), 20.0);
+    assert!((largest_x(&snapshot) - 20.0).abs() < 1e-9);
 
     let o = export(&design, &wide, &["--param", "w=35", "--param", "r=1.5 mm", "--relative-tolerance", "1e-4"]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     let wide: Value = serde_json::from_slice(&std::fs::read(&wide).unwrap()).unwrap();
-    assert_eq!(largest_x(&wide), 35.0);
+    assert!((largest_x(&wide) - 35.0).abs() < 1e-9);
     let names = |s: &Value| s["bodies"][0]["faces"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     assert_eq!(names(&snapshot), names(&wide), "face names stay");
     let w = wide["parameters"].as_array().unwrap().iter().find(|p| p["name"] == "w").unwrap();
