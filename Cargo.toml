@@ -138,6 +138,9 @@ ttf-parser = { version = "0.25", default-features = false, features = ["std", "v
 # The installed fonts, for a character no bundled face has (#20005; MIT, pure Rust). Without
 # fontconfig, its other dependencies are already in the tree.
 fontdb = { version = "0.24", default-features = false, features = ["std", "fs", "memmap"] }
+# The characters each installed face has, read as egui reads them (MIT OR Apache-2.0; egui's own
+# font reader, so already in the tree at this version).
+skrifa = { version = "0.44.0", default-features = false, features = ["std"] }
 
 # Ends a process group with the system call (MIT; already in the tree through zip).
 nix = { version = "0.31", default-features = false, features = ["signal", "user"] }

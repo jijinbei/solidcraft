@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui::{FallbackRequest, FontData, FontFamily, FontInsert, FontPriority, InsertFontFamily};
+use skrifa::MetadataProvider as _;
 
 /// An installed face egui can draw, and the characters it has, as sorted, disjoint ranges.
 struct Face {
@@ -82,26 +83,24 @@ impl egui::FontProvider for SystemFallback {
     }
 }
 
-/// The characters face `id` has a glyph for, as sorted, disjoint ranges; `None` when it has none
-/// or egui cannot draw it (no outline, colour glyph or bitmap).
+/// The characters face `id` has a glyph for, as sorted, disjoint ranges.
 fn chars_of(db: &fontdb::Database, id: fontdb::ID) -> Option<Box<[(u32, u32)]>> {
-    let mut chars = db.with_face_data(id, |data, index| {
-        let face = ttf_parser::Face::parse(data, index).ok()?;
-        let t = face.tables();
-        let drawable = t.glyf.is_some() || t.cff.is_some() || t.cff2.is_some() || t.colr.is_some() || t.sbix.is_some() || t.cbdt.is_some();
-        if !drawable {
-            return None;
-        }
-        let mut chars = Vec::new();
-        for table in t.cmap?.subtables.into_iter().filter(|s| s.is_unicode()) {
-            table.codepoints(|c| {
-                if table.glyph_index(c).is_some_and(|g| g.0 != 0) {
-                    chars.push(c);
-                }
-            });
-        }
-        Some(chars)
-    })??;
+    db.with_face_data(id, chars_in)?
+}
+
+/// The characters face `index` of `data` maps to a glyph, as egui reads them (skrifa's character
+/// map: the Unicode subtable of format 4 or 12 it picks, up to `char::MAX` and the face's glyph
+/// count, so a malformed range cannot run away), as sorted, disjoint ranges. `None` when it maps
+/// none, as a last-resort face such as macOS's `LastResort.otf` (whose format 13 subtable egui does
+/// not read), or egui cannot draw it: without epaint's `color_fonts`, which SolidCraft does not
+/// turn on, it draws outlines only, so a face of bitmaps alone (Noto Color Emoji) is left out.
+fn chars_in(data: &[u8], index: u32) -> Option<Box<[(u32, u32)]>> {
+    let font = skrifa::FontRef::from_index(data, index).ok()?;
+    let drawable = [b"glyf", b"CFF ", b"CFF2"].into_iter().any(|t| font.table_data(skrifa::Tag::new(t)).is_some());
+    if !drawable {
+        return None;
+    }
+    let mut chars: Vec<u32> = font.charmap().mappings().filter(|(_, g)| g.to_u32() != 0).map(|(c, _)| c).collect();
     chars.sort_unstable();
     chars.dedup();
     let mut ranges: Vec<(u32, u32)> = Vec::new();
@@ -126,6 +125,18 @@ pub(crate) fn install(ctx: &egui::Context) {
     let listing = std::thread::Builder::new().name("font-fallback".into()).spawn(move || {
         let mut db = fontdb::Database::new();
         db.load_system_fonts();
+        // In a Flatpak sandbox `/usr/share/fonts` holds the runtime's fonts; the host's system,
+        // local and user fonts are mounted here. A folder that is missing is skipped.
+        #[cfg(target_os = "linux")]
+        for dir in ["/run/host/fonts", "/run/host/local-fonts", "/run/host/user-fonts"] {
+            db.load_fonts_dir(dir);
+        }
+        // fontdb reads `~/.local/share/fonts`, not `$XDG_DATA_HOME/fonts` when that is set
+        // elsewhere.
+        #[cfg(target_os = "linux")]
+        if let Some(data) = std::env::var_os("XDG_DATA_HOME").map(std::path::PathBuf::from).filter(|d| d.is_absolute()) {
+            db.load_fonts_dir(data.join("fonts"));
+        }
         // Repaints, and egui asks again for the characters it missed.
         ctx.add_font_provider(Arc::new(SystemFallback::over(db)));
     });
@@ -207,6 +218,59 @@ mod tests {
         ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
         assert!(ctx.fonts_mut(|f| f.has_glyph(&egui::FontId::proportional(14.0), SCHWA)));
         assert!(!ctx.fonts_mut(|f| f.has_glyph(&egui::FontId::proportional(14.0), '한')));
+    }
+
+    /// A font of a `cmap` with one subtable (`platform`, `encoding`) of format 12 or 13 mapping
+    /// `first..=last` from glyph 1, and a glyph table `glyphs` (`glyf`, or `CBDT` for bitmaps):
+    /// no more than skrifa needs to read it.
+    fn font(platform: u16, encoding: u16, format: u16, first: u32, last: u32, glyphs: &[u8; 4]) -> Vec<u8> {
+        let mut cmap = Vec::new();
+        for v in [0u16, 1, platform, encoding] {
+            cmap.extend(v.to_be_bytes());
+        }
+        cmap.extend(12u32.to_be_bytes());
+        cmap.extend(format.to_be_bytes());
+        cmap.extend(0u16.to_be_bytes());
+        for v in [28u32, 0, 1, first, last, 1] {
+            cmap.extend(v.to_be_bytes());
+        }
+        let tables: [(&[u8; 4], &[u8]); 2] = [(b"cmap", &cmap), (glyphs, &[0; 4])];
+        let mut font = 0x0001_0000u32.to_be_bytes().to_vec();
+        font.extend(2u16.to_be_bytes());
+        font.extend([0; 6]);
+        let mut offset = 12 + 16 * tables.len();
+        for (tag, data) in tables {
+            font.extend(tag);
+            font.extend(0u32.to_be_bytes());
+            for v in [offset, data.len()] {
+                font.extend(u32::try_from(v).unwrap_or_default().to_be_bytes());
+            }
+            offset += data.len();
+        }
+        for (_, data) in tables {
+            font.extend(data);
+        }
+        font
+    }
+
+    #[test]
+    fn a_face_has_the_characters_egui_finds_in_it() {
+        // Format 12, Windows UCS-4: egui reads it.
+        assert_eq!(chars_in(&font(3, 10, 12, 0x4e00, 0x4e10, b"glyf"), 0).as_deref(), Some(&[(0x4e00, 0x4e10)][..]));
+        // Format 13, as in macOS's LastResort.otf: it claims every character, egui reads none,
+        // so the face is left out rather than picked before the face that draws them.
+        assert_eq!(chars_in(&font(0, 6, 13, 0, 0x10_ffff, b"glyf"), 0), None);
+        assert_eq!(chars_in(&font(3, 10, 13, 0, 0x10_ffff, b"glyf"), 0), None);
+        // Bitmaps alone, as Noto Color Emoji: egui without `color_fonts` draws nothing from it.
+        assert_eq!(chars_in(&font(3, 10, 12, 0x1f600, 0x1f610, b"CBDT"), 0), None);
+    }
+
+    #[test]
+    fn a_malformed_range_stops_at_the_last_character() {
+        // A group to u32::MAX: read up to char::MAX and the glyph count, not 4.3e9 characters.
+        let Some(chars) = chars_in(&font(3, 10, 12, 0, u32::MAX, b"glyf"), 0) else { panic!("characters") };
+        assert!(chars.iter().all(|&(first, last)| first <= last && last <= u32::from(char::MAX)));
+        assert!(chars.iter().map(|&(first, last)| last - first + 1).sum::<u32>() <= u32::from(u16::MAX));
     }
 
     #[test]
